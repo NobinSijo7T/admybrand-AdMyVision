@@ -361,6 +361,8 @@ class VoiceManager:
                             os.unlink(temp_filename)
                         except:
                             pass
+                    except Exception as local_error:
+                        print(f"Local TTS playback failed: {local_error}")
                 
             except Exception as e:
                 print(f"❌ Google TTS announcement failed: {e}")
