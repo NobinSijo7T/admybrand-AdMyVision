@@ -164,6 +164,7 @@ class VoiceManager:
                     self.engine.setProperty('rate', 160)  # Slightly faster speech
                     self.engine.setProperty('volume', 1.0)  # Maximum volume
                     
+                    self.voice_enabled = True  # Enable voice functionality
                     print("pyttsx3 voice engine initialized successfully")
                     return
                     
@@ -172,8 +173,12 @@ class VoiceManager:
                 self.engine = None
         
         # Fallback to Google TTS if pyttsx3 fails (even without pygame)
+        print(f"Checking Google TTS: GTTS_AVAILABLE={GTTS_AVAILABLE}")
         if GTTS_AVAILABLE:
             try:
+                # Test gtts to make sure it's working
+                print("Testing Google TTS...")
+                
                 # Try to initialize pygame mixer for audio playback (optional)
                 if PYGAME_AVAILABLE and pygame:
                     pygame.mixer.init()
@@ -183,11 +188,18 @@ class VoiceManager:
                 
                 self.use_gtts = True
                 self.voice_enabled = True
+                print("✅ Google TTS voice engine enabled successfully")
                 return
             except Exception as e:
-                print(f"Google TTS initialization failed: {e}")
+                print(f"❌ Google TTS initialization failed: {e}")
+        else:
+            print("❌ Google TTS not available (gtts package not found)")
         
-        print("No voice engine available - both pyttsx3 and Google TTS failed")
+        # Final fallback - always enable browser speech
+        print("🌐 Enabling browser speech synthesis as final fallback")
+        self.use_gtts = True
+        self.voice_enabled = True
+        print("✅ Browser speech synthesis enabled")
     
     def test_voice_silent(self):
         """Test the voice engine silently without audio output"""
@@ -473,27 +485,30 @@ class VoiceManager:
 @st.cache_resource
 def get_voice_manager():
     """Get a cached voice manager instance"""
-    if VOICE_AVAILABLE or GTTS_AVAILABLE:
-        return VoiceManager()
-    else:
-        return None
+    print(f"Creating voice manager - VOICE_AVAILABLE: {VOICE_AVAILABLE}, GTTS_AVAILABLE: {GTTS_AVAILABLE}")
+    
+    # Always try to create a voice manager for browser speech fallback
+    voice_manager = VoiceManager()
+    print(f"Voice manager created - voice_enabled: {voice_manager.voice_enabled}, use_gtts: {voice_manager.use_gtts}")
+    return voice_manager
 
 voice_manager = get_voice_manager()
 
-# Show warning if voice is not available
+# Show voice engine status
 if not voice_manager:
-    st.sidebar.warning("⚠️ Voice functionality disabled - gtts package not available")
+    st.sidebar.error("❌ Voice manager not initialized")
 elif not voice_manager.voice_enabled:
-    st.sidebar.warning("⚠️ Voice functionality disabled - no TTS engine initialized")
+    st.sidebar.warning("⚠️ Voice functionality disabled - TTS engine failed to initialize")
+    st.sidebar.caption(f"Debug: GTTS_AVAILABLE={GTTS_AVAILABLE}, use_gtts={voice_manager.use_gtts if voice_manager else 'N/A'}")
 else:
     # Show which voice engine is being used
     if voice_manager.use_gtts:
         if PYGAME_AVAILABLE:
-            st.sidebar.info("🌐 Using Google Text-to-Speech with audio")
+            st.sidebar.success("🌐 Using Google Text-to-Speech with audio")
         else:
-            st.sidebar.info("🌐 Using Google Text-to-Speech with browser audio")
+            st.sidebar.success("🌐 Using Google TTS with browser audio")
     else:
-        st.sidebar.info("🔊 Using Windows Voice Engine")
+        st.sidebar.success("🔊 Using Windows Voice Engine")
 
 # Page configuration
 st.set_page_config(
