@@ -731,6 +731,11 @@ class VoiceManager:
         except Exception as e:
             print(f"❌ Voice test component error: {e}")
     
+    def test_voice_simple(self, test_text="Voice test successful"):
+        """Simple voice test using browser speech synthesis"""
+        print(f"🎯 Testing voice: {test_text}")
+        self._speak_with_browser(test_text)
+        
     def reset_speaking_state(self):
         """Force reset the speaking state - useful for debugging"""
         self.is_speaking = False
@@ -1060,9 +1065,10 @@ if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
         # Add test voice button with user interaction
         if st.sidebar.button("🎯 Test Voice"):
             if voice_manager:
-                # Use the enhanced test method
-                voice_manager.test_voice_with_interaction("Hello! Voice test successful. Object detection audio is working.")
-                st.sidebar.info("👆 Click the test button above if voice doesn't play automatically")
+                # Use the simple test method
+                voice_manager.test_voice_simple("Hello! Voice test successful. Object detection audio is working.")
+                st.sidebar.success("🎤 Voice test initiated! Check browser console if no audio.")
+                st.sidebar.info("💡 If no sound, try clicking anywhere on the page first.")
     else:
         st.sidebar.info("🔇 Voice OFF")
 else:
