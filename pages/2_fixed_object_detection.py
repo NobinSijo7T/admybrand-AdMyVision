@@ -402,93 +402,143 @@ class VoiceManager:
         thread.start()
     
     def _speak_with_browser(self, text):
-        """Use browser's speech synthesis for mobile compatibility"""
+        """Use browser's speech synthesis with user interaction handling"""
         try:
             # Escape text for JavaScript to prevent injection issues
-            escaped_text = text.replace("'", "\\'").replace('"', '\\"')
+            escaped_text = text.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
             
-            # JavaScript speech synthesis for browser compatibility
+            # Create a unique ID for this speech request
+            import random
+            speech_id = f"speech_{random.randint(1000, 9999)}"
+            
+            # Enhanced JavaScript speech synthesis
             speech_js = f"""
-            <div id="speech-container" style="display: none;">
+            <div id="{speech_id}" style="position: relative; height: 1px;">
                 <script>
-                console.log('Initializing browser speech synthesis...');
-                
-                function speakText() {{
-                    console.log('speakText called');
-                    if ('speechSynthesis' in window) {{
-                        // Cancel any ongoing speech
-                        speechSynthesis.cancel();
-                        
-                        // Create utterance
-                        var utterance = new SpeechSynthesisUtterance('{escaped_text}');
-                        utterance.rate = 0.8;
-                        utterance.pitch = 1.0;
-                        utterance.volume = 1.0;
-                        
-                        // Get available voices
-                        var voices = speechSynthesis.getVoices();
-                        console.log('Available voices:', voices.length);
-                        
-                        // Try to select a good voice
-                        if (voices.length > 0) {{
-                            // Try to find English female voice first
-                            var selectedVoice = voices.find(voice => 
-                                voice.lang.startsWith('en') && 
-                                (voice.name.toLowerCase().includes('female') || 
-                                 voice.name.toLowerCase().includes('zira') ||
-                                 voice.name.toLowerCase().includes('samantha'))
-                            ) || voices.find(voice => voice.lang.startsWith('en')) || voices[0];
-                            
-                            utterance.voice = selectedVoice;
-                            console.log('Selected voice:', selectedVoice.name);
-                        }}
-                        
-                        // Add event listeners
-                        utterance.onstart = function() {{
-                            console.log('Speech started: {escaped_text}');
-                        }};
-                        utterance.onend = function() {{
-                            console.log('Speech ended: {escaped_text}');
-                        }};
-                        utterance.onerror = function(event) {{
-                            console.error('Speech error:', event.error);
-                        }};
-                        
-                        // Speak the text
-                        speechSynthesis.speak(utterance);
-                        console.log('Browser speech synthesis initiated: {escaped_text}');
-                    }} else {{
-                        console.log('Speech synthesis not supported in this browser');
+                (function() {{
+                    console.log('🎤 Browser speech synthesis initializing for: {escaped_text}');
+                    
+                    // Check if speech synthesis is supported
+                    if (!('speechSynthesis' in window)) {{
+                        console.error('❌ Speech synthesis not supported in this browser');
+                        return;
                     }}
-                }}
-                
-                // Load voices and speak
-                function initAndSpeak() {{
+                    
+                    // Function to speak the text
+                    function speakNow() {{
+                        try {{
+                            console.log('🔊 Speaking now: {escaped_text}');
+                            
+                            // Cancel any ongoing speech
+                            speechSynthesis.cancel();
+                            
+                            // Small delay to ensure cancellation
+                            setTimeout(function() {{
+                                // Create utterance
+                                var utterance = new SpeechSynthesisUtterance('{escaped_text}');
+                                utterance.rate = 0.8;
+                                utterance.pitch = 1.0;
+                                utterance.volume = 1.0;
+                                utterance.lang = 'en-US';
+                                
+                                // Get available voices
+                                var voices = speechSynthesis.getVoices();
+                                console.log('📢 Available voices:', voices.length);
+                                
+                                // Select the best voice
+                                if (voices.length > 0) {{
+                                    var selectedVoice = voices.find(voice => 
+                                        voice.lang === 'en-US' && voice.localService === false
+                                    ) || voices.find(voice => 
+                                        voice.lang.startsWith('en')
+                                    ) || voices[0];
+                                    
+                                    if (selectedVoice) {{
+                                        utterance.voice = selectedVoice;
+                                        console.log('🎯 Selected voice:', selectedVoice.name, selectedVoice.lang);
+                                    }}
+                                }}
+                                
+                                // Event handlers
+                                utterance.onstart = function() {{
+                                    console.log('✅ Speech started: {escaped_text}');
+                                }};
+                                
+                                utterance.onend = function() {{
+                                    console.log('🏁 Speech completed: {escaped_text}');
+                                }};
+                                
+                                utterance.onerror = function(event) {{
+                                    console.error('❌ Speech error:', event.error, event);
+                                }};
+                                
+                                // Speak the text
+                                speechSynthesis.speak(utterance);
+                                console.log('🚀 Speech synthesis initiated successfully');
+                                
+                            }}, 100);
+                            
+                        }} catch (error) {{
+                            console.error('❌ Error in speakNow:', error);
+                        }}
+                    }}
+                    
+                    // Function to handle voices loading
+                    function handleVoicesLoaded() {{
+                        console.log('🔄 Voices loaded, attempting to speak...');
+                        speakNow();
+                    }}
+                    
+                    // Wait for voices to load if needed
                     var voices = speechSynthesis.getVoices();
                     if (voices.length === 0) {{
-                        console.log('Waiting for voices to load...');
-                        speechSynthesis.addEventListener('voiceschanged', function() {{
-                            console.log('Voices loaded, speaking now...');
-                            speakText();
-                        }}, {{ once: true }});
+                        console.log('⏳ Waiting for voices to load...');
+                        speechSynthesis.addEventListener('voiceschanged', handleVoicesLoaded, {{ once: true }});
+                        
+                        // Fallback timeout
+                        setTimeout(function() {{
+                            console.log('⚠️ Voices loading timeout, attempting anyway...');
+                            speakNow();
+                        }}, 2000);
                     }} else {{
-                        console.log('Voices already loaded, speaking immediately...');
-                        speakText();
+                        console.log('✅ Voices already available, speaking immediately');
+                        speakNow();
                     }}
-                }}
-                
-                // Start the process
-                initAndSpeak();
+                    
+                    // Create a click trigger for user interaction
+                    function createClickTrigger() {{
+                        var existingTrigger = document.getElementById('voice-trigger');
+                        if (!existingTrigger) {{
+                            var trigger = document.createElement('div');
+                            trigger.id = 'voice-trigger';
+                            trigger.style.cssText = 'position: fixed; top: -1px; left: -1px; width: 1px; height: 1px; opacity: 0; pointer-events: none;';
+                            trigger.onclick = function() {{
+                                console.log('🖱️ User interaction detected, enabling speech...');
+                                speakNow();
+                            }};
+                            document.body.appendChild(trigger);
+                            
+                            // Simulate click if needed
+                            setTimeout(function() {{
+                                trigger.click();
+                            }}, 500);
+                        }}
+                    }}
+                    
+                    // Ensure user interaction if required
+                    createClickTrigger();
+                    
+                }})();
                 </script>
             </div>
             """
             
-            # Display the JavaScript component with a small height to ensure execution
+            # Display the JavaScript component with minimal height
             components.html(speech_js, height=1)
-            print(f"Browser speech synthesis initiated: {text}")
+            print(f"🎤 Browser speech synthesis requested: {text}")
             
         except Exception as e:
-            print(f"Browser speech synthesis error: {e}")
+            print(f"❌ Browser speech synthesis error: {e}")
 
     def _speak_with_gtts(self, text):
         """Speak using Google Text-to-Speech with proper state management"""
@@ -548,6 +598,138 @@ class VoiceManager:
         # Run in thread to prevent blocking
         thread = threading.Thread(target=speak, daemon=True)
         thread.start()
+    
+    def test_voice_with_interaction(self, test_text="Voice test successful"):
+        """Test voice with user interaction trigger for browser compatibility"""
+        print(f"🎯 Testing voice with user interaction: {test_text}")
+        
+        # Create a more robust browser speech test
+        self._speak_with_browser_test(test_text)
+    
+    def _speak_with_browser_test(self, text):
+        """Enhanced browser speech test with user interaction handling"""
+        try:
+            # Escape text for JavaScript
+            escaped_text = text.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
+            
+            # Create unique ID for this test
+            import random
+            test_id = f"voice_test_{random.randint(1000, 9999)}"
+            
+            # Enhanced test with user interaction
+            test_js = f"""
+            <div id="{test_id}" style="position: relative; height: 20px; margin: 5px 0;">
+                <button id="voice-test-btn-{test_id}" style="
+                    background: linear-gradient(45deg, #4CAF50, #45a049);
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 12px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    transition: all 0.3s ease;
+                " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                    🔊 Click to Test Voice
+                </button>
+                
+                <script>
+                (function() {{
+                    console.log('🎯 Voice test component initialized');
+                    
+                    var testBtn = document.getElementById('voice-test-btn-{test_id}');
+                    var hasSpoken = false;
+                    
+                    function performVoiceTest() {{
+                        if (hasSpoken) return;
+                        hasSpoken = true;
+                        
+                        console.log('🔊 Performing voice test with user interaction');
+                        
+                        if (!('speechSynthesis' in window)) {{
+                            console.error('❌ Speech synthesis not supported');
+                            testBtn.textContent = '❌ Speech Not Supported';
+                            testBtn.style.background = '#f44336';
+                            return;
+                        }}
+                        
+                        try {{
+                            // Cancel any ongoing speech
+                            speechSynthesis.cancel();
+                            
+                            setTimeout(function() {{
+                                var utterance = new SpeechSynthesisUtterance('{escaped_text}');
+                                utterance.rate = 0.8;
+                                utterance.pitch = 1.0;
+                                utterance.volume = 1.0;
+                                utterance.lang = 'en-US';
+                                
+                                // Get and select best voice
+                                var voices = speechSynthesis.getVoices();
+                                if (voices.length > 0) {{
+                                    var bestVoice = voices.find(v => v.lang === 'en-US' && !v.localService) ||
+                                                   voices.find(v => v.lang.startsWith('en')) ||
+                                                   voices[0];
+                                    if (bestVoice) {{
+                                        utterance.voice = bestVoice;
+                                        console.log('🎯 Using voice:', bestVoice.name);
+                                    }}
+                                }}
+                                
+                                // Event handlers
+                                utterance.onstart = function() {{
+                                    console.log('✅ Voice test started successfully');
+                                    testBtn.textContent = '🔊 Speaking...';
+                                    testBtn.style.background = '#2196F3';
+                                }};
+                                
+                                utterance.onend = function() {{
+                                    console.log('✅ Voice test completed successfully');
+                                    testBtn.textContent = '✅ Voice Test Passed';
+                                    testBtn.style.background = '#4CAF50';
+                                }};
+                                
+                                utterance.onerror = function(event) {{
+                                    console.error('❌ Voice test failed:', event.error);
+                                    testBtn.textContent = '❌ Voice Test Failed';
+                                    testBtn.style.background = '#f44336';
+                                }};
+                                
+                                // Speak the test
+                                speechSynthesis.speak(utterance);
+                                console.log('🚀 Voice test speech initiated');
+                                
+                            }}, 100);
+                            
+                        }} catch (error) {{
+                            console.error('❌ Voice test exception:', error);
+                            testBtn.textContent = '❌ Test Failed';
+                            testBtn.style.background = '#f44336';
+                        }}
+                    }}
+                    
+                    // Click handler
+                    testBtn.onclick = performVoiceTest;
+                    
+                    // Auto-trigger after a delay (may not work due to user interaction requirement)
+                    setTimeout(function() {{
+                        if (!hasSpoken) {{
+                            console.log('⚡ Auto-triggering voice test...');
+                            performVoiceTest();
+                        }}
+                    }}, 1000);
+                    
+                }})();
+                </script>
+            </div>
+            """
+            
+            # Display with proper height
+            components.html(test_js, height=50)
+            print(f"🎯 Voice test component created: {text}")
+            
+        except Exception as e:
+            print(f"❌ Voice test component error: {e}")
     
     def reset_speaking_state(self):
         """Force reset the speaking state - useful for debugging"""
@@ -738,6 +920,57 @@ if net is None:
 # Header
 st.title("🎯 AdMyVision - Real-time Object Detection")
 st.markdown("### 🚀 AI-Powered Object Detection with Voice Announcements")
+
+# Add global speech synthesis initialization
+if voice_manager and voice_manager.voice_enabled:
+    # Create a global speech enabler component
+    speech_enabler_js = """
+    <div id="global-speech-enabler" style="display: none;">
+        <script>
+        (function() {
+            console.log('🌐 Global speech synthesis enabler loaded');
+            
+            // Function to enable speech synthesis
+            function enableSpeechSynthesis() {
+                if ('speechSynthesis' in window) {
+                    // Create a silent utterance to trigger permission
+                    var silentUtterance = new SpeechSynthesisUtterance(' ');
+                    silentUtterance.volume = 0;
+                    silentUtterance.rate = 10;
+                    
+                    silentUtterance.onend = function() {
+                        console.log('✅ Speech synthesis enabled globally');
+                        window.speechEnabled = true;
+                    };
+                    
+                    speechSynthesis.speak(silentUtterance);
+                }
+            }
+            
+            // Try to enable on page interaction
+            function handleUserInteraction() {
+                console.log('👆 User interaction detected, enabling speech...');
+                enableSpeechSynthesis();
+                // Remove listeners after first interaction
+                document.removeEventListener('click', handleUserInteraction);
+                document.removeEventListener('keydown', handleUserInteraction);
+                document.removeEventListener('touchstart', handleUserInteraction);
+            }
+            
+            // Add event listeners for user interaction
+            document.addEventListener('click', handleUserInteraction, { passive: true });
+            document.addEventListener('keydown', handleUserInteraction, { passive: true });
+            document.addEventListener('touchstart', handleUserInteraction, { passive: true });
+            
+            // Try immediate enablement (may not work without user interaction)
+            setTimeout(enableSpeechSynthesis, 1000);
+            
+        })();
+        </script>
+    </div>
+    """
+    components.html(speech_enabler_js, height=1)
+
 st.markdown("---")
 
 # Console-like UI for system status and model loading
@@ -820,13 +1053,16 @@ if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
 
     if voice_enabled:
         if voice_manager.use_gtts:
-            st.sidebar.success("🎤 Voice ON (Google TTS)")
+            st.sidebar.success("🎤 Voice ON (Browser Speech)")
         else:
             st.sidebar.success("🎤 Voice ON (Windows)")
-        # Add test voice button
+        
+        # Add test voice button with user interaction
         if st.sidebar.button("🎯 Test Voice"):
             if voice_manager:
-                voice_manager.announce_detection("test object", 1.5)
+                # Use the enhanced test method
+                voice_manager.test_voice_with_interaction("Hello! Voice test successful. Object detection audio is working.")
+                st.sidebar.info("👆 Click the test button above if voice doesn't play automatically")
     else:
         st.sidebar.info("🔇 Voice OFF")
 else:
