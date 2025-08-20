@@ -42,7 +42,33 @@ try:
 except ImportError:
     GTTS_AVAILABLE = False
 
-from sample_utils.download import download_file
+# Try to import download_file, if not available, define it inline
+try:
+    from sample_utils.download import download_file
+except ImportError:
+    # Define download_file inline if the module is not available
+    import urllib.request
+    from pathlib import Path
+    
+    def download_file(url, download_to: Path, expected_size=None):
+        """Download a file from URL to local path."""
+        # Don't download the file twice.
+        if download_to.exists():
+            if expected_size:
+                if download_to.stat().st_size == expected_size:
+                    return
+            else:
+                st.info(f"{url} is already downloaded.")
+                if not st.button("Download again?"):
+                    return
+        
+        download_to.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Download the file
+        with st.spinner(f"Downloading {url}..."):
+            urllib.request.urlretrieve(url, download_to)
+        
+        st.success(f"Downloaded {url} to {download_to}")
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
@@ -140,7 +166,8 @@ class VoiceManager:
     
     def set_voice_enabled(self, enabled):
         """Enable or disable voice announcements"""
-        self.voice_enabled = enabled and self.engine is not None
+        self.voice_enabled = enabled and (self.engine is not None or self.use_gtts)
+        print(f"🔊 Voice enabled set to: {self.voice_enabled} (enabled={enabled}, engine={self.engine is not None}, gtts={self.use_gtts})")
     
     def announce_detection(self, object_name, distance, confidence=None):
         """Announce detected object with distance using available TTS engine"""
