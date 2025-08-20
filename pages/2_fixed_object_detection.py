@@ -46,14 +46,32 @@ try:
     import pythoncom  # For Windows COM initialization
     VOICE_AVAILABLE = True
 except ImportError:
+    pyttsx3 = None
+    pythoncom = None
     VOICE_AVAILABLE = False
+    print("pyttsx3 not available - voice synthesis will use browser/gtts fallback")
 
 # Try to import Google Text-to-Speech as fallback
 try:
     from gtts import gTTS
+    GTTS_AVAILABLE = True
+except ImportError:
+    gTTS = None
+    GTTS_AVAILABLE = False
+    print("gtts not available - voice synthesis will use browser fallback")
+
+# Try to import pygame for audio playback
+try:
     import pygame
-    import tempfile
-    import os
+    PYGAME_AVAILABLE = True
+except ImportError:
+    pygame = None
+    PYGAME_AVAILABLE = False
+    print("pygame not available - audio playback will use browser fallback")
+
+# Additional imports
+import tempfile
+import os
     GTTS_AVAILABLE = True
 except ImportError:
     GTTS_AVAILABLE = False
@@ -82,11 +100,11 @@ class VoiceManager:
     
     def init_voice_engine(self):
         """Initialize the text-to-speech engine with fallback options"""
-        # Try pyttsx3 first
-        if VOICE_AVAILABLE:
+        # Try pyttsx3 first (only if available)
+        if VOICE_AVAILABLE and pyttsx3:
             try:
                 # Initialize COM for Windows
-                if hasattr(pythoncom, 'CoInitialize'):
+                if pythoncom and hasattr(pythoncom, 'CoInitialize'):
                     pythoncom.CoInitialize()
                 
                 # Try different driver options for better Windows compatibility
@@ -355,6 +373,11 @@ class VoiceManager:
 
     def _speak_with_gtts(self, text):
         """Speak using Google Text-to-Speech with proper state management"""
+        if not GTTS_AVAILABLE or not gTTS:
+            print("Google TTS not available, using browser speech synthesis")
+            self._speak_with_browser(text)
+            return
+            
         def speak():
             try:
                 # Set speaking flag
@@ -368,8 +391,9 @@ class VoiceManager:
                 tts = gTTS(text=text, lang='en', slow=False)
                 tts.save(temp_filename)
                 
-                # Play the audio file
-                pygame.mixer.music.load(temp_filename)
+                # Play the audio file (only if pygame is available)
+                if PYGAME_AVAILABLE and pygame:
+                    pygame.mixer.music.load(temp_filename)
                 pygame.mixer.music.play()
                 
                 # Wait for playback to complete
