@@ -557,24 +557,32 @@ def generate_label_colors():
 def load_model():
     """Load the object detection model."""
     try:
+        def safe_console_message(message, msg_type="info"):
+            """Safely add console message with fallback"""
+            try:
+                add_console_message(message, msg_type)
+            except NameError:
+                # Console function not available yet, use print as fallback
+                print(f"[{msg_type.upper()}] {message}")
+        
         # Download models if needed
         if not MODEL_LOCAL_PATH.exists():
-            add_console_message("Downloading MobileNet-SSD model...", "download")
-            add_console_message(f"Downloading {MODEL_URL}...", "info")
+            safe_console_message("Downloading MobileNet-SSD model...", "download")
+            safe_console_message(f"Downloading {MODEL_URL}...", "info")
             download_file(MODEL_URL, MODEL_LOCAL_PATH, expected_size=23147564)
-            add_console_message("Downloaded MobileNetSSD_deploy.caffemodel", "success")
+            safe_console_message("Downloaded MobileNetSSD_deploy.caffemodel", "success")
         
         # Check for prototxt file (try both naming conventions)
         prototxt_path = PROTOTXT_LOCAL_PATH
         if not prototxt_path.exists() and PROTOTXT_ALT_PATH.exists():
             prototxt_path = PROTOTXT_ALT_PATH
         elif not prototxt_path.exists():
-            add_console_message("Downloading model configuration...", "download")
-            add_console_message(f"Downloading {PROTOTXT_URL}...", "info")
+            safe_console_message("Downloading model configuration...", "download")
+            safe_console_message(f"Downloading {PROTOTXT_URL}...", "info")
             download_file(PROTOTXT_URL, PROTOTXT_LOCAL_PATH, expected_size=29353)
-            add_console_message("Downloaded MobileNetSSD_deploy.prototxt.txt", "success")
+            safe_console_message("Downloaded MobileNetSSD_deploy.prototxt.txt", "success")
         
-        add_console_message(f"Loading model from: {prototxt_path.name}", "info")
+        safe_console_message(f"Loading model from: {prototxt_path.name}", "info")
         net = cv2.dnn.readNetFromCaffe(str(prototxt_path), str(MODEL_LOCAL_PATH))
         
         # Test the model with a dummy input
@@ -582,13 +590,21 @@ def load_model():
         net.setInput(dummy_blob)
         test_output = net.forward()
         
-        add_console_message(f"Model loaded successfully! Output shape: {test_output.shape}", "success")
+        safe_console_message(f"Model loaded successfully! Output shape: {test_output.shape}", "success")
         return net
         
     except Exception as e:
-        add_console_message(f"Error loading model: {e}", "error")
-        add_console_message(f"Model path: {MODEL_LOCAL_PATH}", "error")
-        add_console_message(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}", "error")
+        def safe_console_message(message, msg_type="info"):
+            """Safely add console message with fallback"""
+            try:
+                add_console_message(message, msg_type)
+            except NameError:
+                # Console function not available yet, use print as fallback
+                print(f"[{msg_type.upper()}] {message}")
+                
+        safe_console_message(f"Error loading model: {e}", "error")
+        safe_console_message(f"Model path: {MODEL_LOCAL_PATH}", "error")
+        safe_console_message(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}", "error")
         return None
 
 def get_local_ip():
