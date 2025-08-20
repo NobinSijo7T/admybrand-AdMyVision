@@ -171,13 +171,18 @@ class VoiceManager:
                 print(f"pyttsx3 initialization failed: {e}")
                 self.engine = None
         
-        # Fallback to Google TTS if pyttsx3 fails
+        # Fallback to Google TTS if pyttsx3 fails (even without pygame)
         if GTTS_AVAILABLE:
             try:
-                # Initialize pygame mixer for audio playback
-                pygame.mixer.init()
+                # Try to initialize pygame mixer for audio playback (optional)
+                if PYGAME_AVAILABLE and pygame:
+                    pygame.mixer.init()
+                    print("Google Text-to-Speech with pygame audio initialized successfully")
+                else:
+                    print("Google Text-to-Speech with browser audio fallback initialized successfully")
+                
                 self.use_gtts = True
-                print("Google Text-to-Speech fallback initialized successfully")
+                self.voice_enabled = True
                 return
             except Exception as e:
                 print(f"Google TTS initialization failed: {e}")
@@ -419,15 +424,23 @@ class VoiceManager:
                 # Play the audio file (only if pygame is available)
                 if PYGAME_AVAILABLE and pygame:
                     pygame.mixer.music.load(temp_filename)
-                pygame.mixer.music.play()
-                
-                # Wait for playback to complete
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
+                    pygame.mixer.music.play()
+                    
+                    # Wait for playback to complete
+                    while pygame.mixer.music.get_busy():
+                        time.sleep(0.1)
+                    
+                    print(f"Successfully announced with Google TTS + pygame: {text}")
+                else:
+                    # If pygame not available, fall back to browser speech
+                    print(f"Pygame not available, using browser speech: {text}")
+                    self._speak_with_browser(text)
                 
                 # Clean up temporary file
-                os.unlink(temp_filename)
-                print(f"Successfully announced with Google TTS: {text}")
+                try:
+                    os.unlink(temp_filename)
+                except:
+                    pass  # Ignore cleanup errors
                 
             except Exception as e:
                 print(f"Google TTS announcement failed: {e}")
@@ -468,12 +481,17 @@ def get_voice_manager():
 voice_manager = get_voice_manager()
 
 # Show warning if voice is not available
-if not voice_manager or (not voice_manager.engine and not voice_manager.use_gtts):
-    st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
+if not voice_manager:
+    st.sidebar.warning("⚠️ Voice functionality disabled - gtts package not available")
+elif not voice_manager.voice_enabled:
+    st.sidebar.warning("⚠️ Voice functionality disabled - no TTS engine initialized")
 else:
     # Show which voice engine is being used
     if voice_manager.use_gtts:
-        st.sidebar.info("🌐 Using Google Text-to-Speech")
+        if PYGAME_AVAILABLE:
+            st.sidebar.info("🌐 Using Google Text-to-Speech with audio")
+        else:
+            st.sidebar.info("🌐 Using Google Text-to-Speech with browser audio")
     else:
         st.sidebar.info("🔊 Using Windows Voice Engine")
 
