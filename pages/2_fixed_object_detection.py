@@ -94,89 +94,120 @@ class VoiceManager:
         """Initialize the text-to-speech engine with fallback options"""
         print(f"Initializing voice engine - VOICE_AVAILABLE: {VOICE_AVAILABLE}, GTTS_AVAILABLE: {GTTS_AVAILABLE}")
         
-        # For cloud deployment, prefer Google TTS over pyttsx3
+        # Detect cloud deployment environment
         import platform
-        is_cloud = platform.system() == "Linux" or "STREAMLIT_SHARING" in os.environ
+        is_cloud = (platform.system() == "Linux" or 
+                   "STREAMLIT_SHARING" in os.environ or 
+                   "STREAMLIT_CLOUD" in os.environ or
+                   "HOSTNAME" in os.environ and "streamlit" in os.environ.get("HOSTNAME", "").lower())
         
-        if is_cloud:
-            print("Cloud environment detected, prioritizing Google TTS...")
-            # Try Google TTS first for cloud deployment
-            if GTTS_AVAILABLE:
+        print(f"Environment: {'Cloud' if is_cloud else 'Local'} ({platform.system()})")
+        
+        # For cloud deployment, use Google TTS as primary option
+        if is_cloud and GTTS_AVAILABLE:
+            try:
+                print("🌐 Cloud environment: Initializing Google TTS...")
+                
+                # Test Google TTS with a simple phrase
+                from gtts import gTTS
+                import io
+                test_text = "test"
+                tts = gTTS(text=test_text, lang='en', slow=False)
+                
+                # Initialize pygame mixer with cloud-compatible settings
                 try:
-                    print("Attempting Google TTS initialization...")
-                    # Initialize pygame mixer for audio playback
+                    pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=1024)
                     pygame.mixer.init()
-                    self.use_gtts = True
-                    print("✅ Google Text-to-Speech initialized successfully")
-                    return
-                except Exception as e:
-                    print(f"❌ Google TTS initialization failed: {e}")
+                    print("✅ Pygame mixer initialized for cloud")
+                except Exception as mixer_error:
+                    print(f"⚠️ Pygame mixer warning: {mixer_error}")
+                    # Continue anyway, might still work
+                
+                self.use_gtts = True
+                self.engine = None  # Clear any previous engine
+                print("✅ Google Text-to-Speech initialized successfully for cloud deployment")
+                return
+                
+            except ImportError as e:
+                print(f"❌ Google TTS import failed: {e}")
+            except Exception as e:
+                print(f"❌ Google TTS cloud initialization failed: {e}")
         
-        # Try pyttsx3 first for local development
+        # Try pyttsx3 for local development or as fallback
         if VOICE_AVAILABLE:
             try:
-                print("Attempting pyttsx3 initialization...")
+                print("🖥️ Attempting pyttsx3 initialization...")
+                
                 # Initialize COM for Windows
-                if hasattr(pythoncom, 'CoInitialize'):
+                if platform.system() == "Windows" and hasattr(pythoncom, 'CoInitialize'):
                     pythoncom.CoInitialize()
                 
-                # Try different driver options for better compatibility
-                drivers = ['sapi5', 'nsss', 'espeak']
-                for driver in drivers:
+                # For Linux/cloud, try espeak driver first
+                if is_cloud:
+                    drivers_to_try = ['espeak', 'dummy']
+                else:
+                    drivers_to_try = ['sapi5', 'nsss', 'espeak', 'dummy']
+                
+                for driver in drivers_to_try:
                     try:
+                        print(f"Trying {driver} driver...")
                         self.engine = pyttsx3.init(driver)
                         if self.engine:
-                            print(f"✅ Voice engine initialized successfully with {driver} driver")
-                            break
-                    except Exception as e:
-                        print(f"Driver {driver} failed: {e}")
+                            print(f"✅ Voice engine initialized with {driver} driver")
+                            
+                            # Configure voice properties
+                            try:
+                                voices = self.engine.getProperty('voices')
+                                if voices and len(voices) > 0:
+                                    selected_voice = voices[0]
+                                    self.engine.setProperty('voice', selected_voice.id)
+                                    print(f"Selected voice: {selected_voice.name}")
+                                
+                                self.engine.setProperty('rate', 160)
+                                self.engine.setProperty('volume', 1.0)
+                            except Exception as prop_error:
+                                print(f"⚠️ Voice property configuration warning: {prop_error}")
+                            
+                            return
+                    except Exception as driver_error:
+                        print(f"Driver {driver} failed: {driver_error}")
                         continue
                 
-                if not self.engine:
-                    print("Trying default pyttsx3 initialization...")
-                    # Fallback to default initialization
-                    self.engine = pyttsx3.init()
-                
+                print("All pyttsx3 drivers failed, trying default initialization...")
+                self.engine = pyttsx3.init()
                 if self.engine:
-                    print("✅ pyttsx3 voice engine initialized")
-                    # Set voice properties for better audio output
-                    voices = self.engine.getProperty('voices')
-                    if voices and len(voices) > 0:
-                        # Try to find a female voice first, fallback to first voice
-                        selected_voice = voices[0]
-                        for voice in voices:
-                            if 'female' in voice.name.lower() or 'zira' in voice.name.lower():
-                                selected_voice = voice
-                                break
-                        self.engine.setProperty('voice', selected_voice.id)
-                        print(f"Selected voice: {selected_voice.name}")
-                    
-                    # Configure speech properties for clear output
-                    self.engine.setProperty('rate', 160)  # Slightly faster speech
-                    self.engine.setProperty('volume', 1.0)  # Maximum volume
-                    
-                    print("pyttsx3 voice engine initialized successfully")
+                    print("✅ pyttsx3 initialized with default driver")
                     return
                     
             except Exception as e:
-                print(f"❌ pyttsx3 initialization failed: {e}")
+                print(f"❌ pyttsx3 initialization completely failed: {e}")
                 self.engine = None
         
-        # Fallback to Google TTS if pyttsx3 fails
+        # Final fallback to Google TTS if not already tried
         if GTTS_AVAILABLE and not self.use_gtts:
             try:
-                print("Attempting Google TTS fallback...")
-                # Initialize pygame mixer for audio playback
-                pygame.mixer.init()
+                print("🔄 Final fallback: Attempting Google TTS...")
+                
+                # Simple initialization without extensive testing
                 self.use_gtts = True
-                print("✅ Google Text-to-Speech fallback initialized successfully")
+                self.engine = None
+                
+                # Try basic pygame initialization
+                try:
+                    pygame.mixer.init()
+                except:
+                    pass  # Continue even if mixer fails
+                
+                print("✅ Google TTS fallback enabled")
                 return
+                
             except Exception as e:
-                print(f"❌ Google TTS initialization failed: {e}")
+                print(f"❌ Google TTS fallback failed: {e}")
         
-        print("❌ No voice engines available")
-        
-        print("No voice engine available - both pyttsx3 and Google TTS failed")
+        # If everything fails, at least log the attempt
+        print("❌ All voice engines failed - voice functionality will be disabled")
+        self.engine = None
+        self.use_gtts = False
     
     def test_voice_silent(self):
         """Test the voice engine silently without audio output"""
@@ -340,37 +371,99 @@ class VoiceManager:
         thread.start()
     
     def _speak_with_gtts(self, text):
-        """Speak using Google Text-to-Speech with proper state management"""
+        """Speak using Google Text-to-Speech with cloud-optimized approach"""
         def speak():
+            success = False
+            temp_filename = None
             try:
                 # Set speaking flag
                 self.is_speaking = True
+                self.speaking_start_time = time.time()
+                print(f"Starting Google TTS announcement: {text}")
                 
-                # Create temporary file for audio
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-                    temp_filename = temp_file.name
+                # Import required modules
+                from gtts import gTTS
+                import tempfile
                 
-                # Generate speech with Google TTS
-                tts = gTTS(text=text, lang='en', slow=False)
-                tts.save(temp_filename)
+                # Create temporary file for audio with better error handling
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                        temp_filename = temp_file.name
+                except Exception as temp_error:
+                    print(f"Failed to create temp file: {temp_error}")
+                    # Fallback to current directory
+                    temp_filename = f"tts_temp_{int(time.time())}.mp3"
                 
-                # Play the audio file
-                pygame.mixer.music.load(temp_filename)
-                pygame.mixer.music.play()
+                # Generate speech with Google TTS with cloud-friendly settings
+                try:
+                    tts = gTTS(text=text, lang='en', slow=False, timeout=10)
+                    tts.save(temp_filename)
+                    print(f"Audio saved to: {temp_filename}")
+                except Exception as tts_error:
+                    print(f"Google TTS generation failed: {tts_error}")
+                    raise
                 
-                # Wait for playback to complete
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
+                # Initialize pygame mixer if not already done
+                try:
+                    if not pygame.mixer.get_init():
+                        pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+                except Exception as mixer_error:
+                    print(f"Pygame mixer initialization failed: {mixer_error}")
+                    # Try with default settings
+                    pygame.mixer.init()
                 
-                # Clean up temporary file
-                os.unlink(temp_filename)
-                print(f"Successfully announced with Google TTS: {text}")
+                # Play the audio file with cloud-compatible settings
+                try:
+                    pygame.mixer.music.load(temp_filename)
+                    pygame.mixer.music.play()
+                    
+                    # Wait for playback to complete with timeout
+                    max_wait_time = 10  # Maximum 10 seconds for any announcement
+                    start_time = time.time()
+                    
+                    while pygame.mixer.music.get_busy():
+                        if time.time() - start_time > max_wait_time:
+                            print("Audio playback timeout - stopping")
+                            pygame.mixer.music.stop()
+                            break
+                        time.sleep(0.1)
+                    
+                    success = True
+                    print(f"Successfully announced with Google TTS: {text}")
+                    
+                except Exception as play_error:
+                    print(f"Audio playback failed: {play_error}")
+                    
+                    # Alternative playback method for cloud environments
+                    try:
+                        # Try using playsound as fallback
+                        import subprocess
+                        subprocess.run(['aplay', temp_filename], timeout=10, capture_output=True)
+                        success = True
+                        print(f"Successfully announced with aplay: {text}")
+                    except Exception as alt_error:
+                        print(f"Alternative playback also failed: {alt_error}")
                 
+            except ImportError as import_error:
+                print(f"Google TTS import failed: {import_error}")
             except Exception as e:
                 print(f"Google TTS announcement failed: {e}")
             finally:
+                # Clean up temporary file
+                if temp_filename and os.path.exists(temp_filename):
+                    try:
+                        os.unlink(temp_filename)
+                        print(f"Cleaned up temp file: {temp_filename}")
+                    except Exception as cleanup_error:
+                        print(f"Failed to cleanup temp file: {cleanup_error}")
+                
                 # Always clear the speaking flag
                 self.is_speaking = False
+                
+                if success:
+                    print(f"✅ Google TTS announcement completed: {text}")
+                else:
+                    print(f"❌ Google TTS announcement failed: {text}")
         
         # Run in thread to prevent blocking
         thread = threading.Thread(target=speak, daemon=True)
@@ -392,6 +485,63 @@ class VoiceManager:
                 self.reset_speaking_state()
                 return True
         return False
+
+def test_voice_engines():
+    """Test which voice engines are available for cloud deployment"""
+    results = {
+        'pyttsx3': False,
+        'gtts': False, 
+        'pygame': False,
+        'system_audio': False
+    }
+    
+    # Test pyttsx3
+    if VOICE_AVAILABLE:
+        try:
+            import platform
+            if platform.system() == "Linux":
+                # Try espeak driver for Linux
+                test_engine = pyttsx3.init('espeak')
+            else:
+                test_engine = pyttsx3.init()
+            if test_engine:
+                results['pyttsx3'] = True
+                del test_engine
+        except Exception as e:
+            print(f"pyttsx3 test failed: {e}")
+    
+    # Test Google TTS
+    if GTTS_AVAILABLE:
+        try:
+            from gtts import gTTS
+            # Test with a simple word
+            tts = gTTS(text="test", lang='en', slow=False)
+            results['gtts'] = True
+        except Exception as e:
+            print(f"Google TTS test failed: {e}")
+    
+    # Test pygame
+    try:
+        import pygame
+        pygame.mixer.init()
+        results['pygame'] = True
+        pygame.mixer.quit()
+    except Exception as e:
+        print(f"Pygame test failed: {e}")
+    
+    # Test system audio
+    try:
+        import subprocess
+        import platform
+        if platform.system() == "Linux":
+            # Test if aplay is available
+            result = subprocess.run(['which', 'aplay'], capture_output=True)
+            if result.returncode == 0:
+                results['system_audio'] = True
+    except Exception as e:
+        print(f"System audio test failed: {e}")
+    
+    return results
 
 # Initialize voice manager (cached to prevent multiple initializations)
 @st.cache_resource
@@ -542,6 +692,35 @@ if "voice_enabled" not in st.session_state:
 # Sidebar
 st.sidebar.title("🔧 Settings")
 score_threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.3, 0.05)  # Lower default threshold
+
+# Add voice engine diagnostics section for cloud deployment debugging
+import platform
+if platform.system() == "Linux" or "STREAMLIT_SHARING" in os.environ or "STREAMLIT_CLOUD" in os.environ:
+    with st.sidebar.expander("🔍 Voice Engine Diagnostics", expanded=True):
+        st.write("**Environment:** Cloud/Linux")
+        
+        # Test voice engines
+        test_results = test_voice_engines()
+        
+        for engine, available in test_results.items():
+            if available:
+                st.success(f"✅ {engine.upper()}")
+            else:
+                st.error(f"❌ {engine.upper()}")
+        
+        st.write(f"**Voice Manager Status:**")
+        if voice_manager:
+            st.write(f"- Engine: {'Available' if voice_manager.engine else 'None'}")
+            st.write(f"- Google TTS: {'Active' if voice_manager.use_gtts else 'Inactive'}")
+            st.write(f"- Voice Enabled: {voice_manager.voice_enabled}")
+        else:
+            st.error("Voice Manager: Not initialized")
+        
+        # Show environment variables
+        st.write("**Environment Variables:**")
+        for env_var in ["STREAMLIT_SHARING", "STREAMLIT_CLOUD", "HOSTNAME"]:
+            value = os.environ.get(env_var, "Not set")
+            st.text(f"{env_var}: {value}")
 
 # Voice toggle button (only show if voice is available)
 if voice_manager and (voice_manager.engine or voice_manager.use_gtts):

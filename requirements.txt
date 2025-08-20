@@ -8,3 +8,13 @@ pygame
 pyttsx3
 qrcode
 requests
+playsound==1.2.2=1.35.0
+streamlit-webrtc
+opencv-python-headless
+numpy
+Pillow
+gtts
+pygame
+pyttsx3
+qrcode
+requests
