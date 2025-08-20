@@ -172,9 +172,7 @@ The system tracks and reports:
 | High CPU usage | Reduce to 320×240 resolution or switch to WASM mode |
 | Connection drops | Use Chrome `webrtc-internals` to inspect stats |
 
-## 🎥 Demo Video
 
-[Live Demo Application](https://share.streamlit.io/whitphx/style-transfer-web-app/main/app.py) - Live phone stream, metrics, and improvements
 
 ## 📋 Requirements
 
