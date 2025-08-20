@@ -79,7 +79,7 @@ logger = logging.getLogger(__name__)
 class VoiceManager:
     def __init__(self):
         self.engine = None
-        self.voice_enabled = False
+        self.voice_enabled = True  # Default to enabled when engines are available
         self.last_announcement = {}
         self.announcement_cooldown = 3  # seconds between same object announcements
         self.use_gtts = False
@@ -92,9 +92,12 @@ class VoiceManager:
     
     def init_voice_engine(self):
         """Initialize the text-to-speech engine with fallback options"""
+        print(f"Initializing voice engine - VOICE_AVAILABLE: {VOICE_AVAILABLE}, GTTS_AVAILABLE: {GTTS_AVAILABLE}")
+        
         # Try pyttsx3 first
         if VOICE_AVAILABLE:
             try:
+                print("Attempting pyttsx3 initialization...")
                 # Initialize COM for Windows
                 if hasattr(pythoncom, 'CoInitialize'):
                     pythoncom.CoInitialize()
@@ -105,16 +108,19 @@ class VoiceManager:
                     try:
                         self.engine = pyttsx3.init(driver)
                         if self.engine:
-                            print(f"Voice engine initialized successfully with {driver} driver")
+                            print(f"✅ Voice engine initialized successfully with {driver} driver")
                             break
-                    except:
+                    except Exception as e:
+                        print(f"Driver {driver} failed: {e}")
                         continue
                 
                 if not self.engine:
+                    print("Trying default pyttsx3 initialization...")
                     # Fallback to default initialization
                     self.engine = pyttsx3.init()
                 
                 if self.engine:
+                    print("✅ pyttsx3 voice engine initialized")
                     # Set voice properties for better audio output
                     voices = self.engine.getProperty('voices')
                     if voices and len(voices) > 0:
@@ -135,19 +141,20 @@ class VoiceManager:
                     return
                     
             except Exception as e:
-                print(f"pyttsx3 initialization failed: {e}")
+                print(f"❌ pyttsx3 initialization failed: {e}")
                 self.engine = None
         
         # Fallback to Google TTS if pyttsx3 fails
         if GTTS_AVAILABLE:
             try:
+                print("Attempting Google TTS initialization...")
                 # Initialize pygame mixer for audio playback
                 pygame.mixer.init()
                 self.use_gtts = True
-                print("Google Text-to-Speech fallback initialized successfully")
+                print("✅ Google Text-to-Speech fallback initialized successfully")
                 return
             except Exception as e:
-                print(f"Google TTS initialization failed: {e}")
+                print(f"❌ Google TTS initialization failed: {e}")
         
         print("No voice engine available - both pyttsx3 and Google TTS failed")
     
@@ -370,15 +377,21 @@ class VoiceManager:
 @st.cache_resource
 def get_voice_manager():
     """Get a cached voice manager instance"""
+    print(f"Creating voice manager - VOICE_AVAILABLE: {VOICE_AVAILABLE}, GTTS_AVAILABLE: {GTTS_AVAILABLE}")
     if VOICE_AVAILABLE or GTTS_AVAILABLE:
-        return VoiceManager()
+        vm = VoiceManager()
+        print(f"Voice manager created - voice_enabled: {vm.voice_enabled}, use_gtts: {vm.use_gtts}")
+        return vm
     else:
+        print("No voice engines available")
         return None
 
 voice_manager = get_voice_manager()
 
 # Show warning if voice is not available
-if not voice_manager or (not voice_manager.engine and not voice_manager.use_gtts):
+if not voice_manager:
+    st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
+elif not voice_manager.engine and not voice_manager.use_gtts:
     st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
 else:
     # Show which voice engine is being used
@@ -502,7 +515,7 @@ if "detections" not in st.session_state:
 if "last_detection_frame" not in st.session_state:
     st.session_state.last_detection_frame = 0
 if "voice_enabled" not in st.session_state:
-    st.session_state.voice_enabled = False
+    st.session_state.voice_enabled = True  # Default to enabled when voice is available
 
 # Sidebar
 st.sidebar.title("🔧 Settings")
@@ -532,6 +545,11 @@ if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
 else:
     st.sidebar.warning("🔇 Voice Unavailable")
     st.session_state.voice_enabled = False
+
+# Final safety check: Ensure voice manager is properly enabled
+if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
+    voice_manager.set_voice_enabled(st.session_state.voice_enabled)
+    print(f"🚨 FINAL SAFETY CHECK: Forcing voice_enabled to {st.session_state.voice_enabled} after creation")
 
 mode = st.sidebar.selectbox(
     "📹 Camera Source",
