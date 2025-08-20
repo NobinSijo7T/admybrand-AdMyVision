@@ -16,6 +16,7 @@ import logging
 import queue
 import time
 import threading
+import platform
 from pathlib import Path
 from typing import List, NamedTuple
 import socket
@@ -200,6 +201,11 @@ class VoiceManager:
         self.use_gtts = True
         self.voice_enabled = True
         print("✅ Browser speech synthesis enabled")
+        
+        # Double-check that voice is enabled
+        if not self.voice_enabled:
+            print("⚠️ Forcing voice_enabled = True for browser speech")
+            self.voice_enabled = True
     
     def test_voice_silent(self):
         """Test the voice engine silently without audio output"""
@@ -553,18 +559,22 @@ def load_model():
     try:
         # Download models if needed
         if not MODEL_LOCAL_PATH.exists():
-            st.info("📥 Downloading MobileNet-SSD model...")
+            add_console_message("Downloading MobileNet-SSD model...", "download")
+            add_console_message(f"Downloading {MODEL_URL}...", "info")
             download_file(MODEL_URL, MODEL_LOCAL_PATH, expected_size=23147564)
+            add_console_message("Downloaded MobileNetSSD_deploy.caffemodel", "success")
         
         # Check for prototxt file (try both naming conventions)
         prototxt_path = PROTOTXT_LOCAL_PATH
         if not prototxt_path.exists() and PROTOTXT_ALT_PATH.exists():
             prototxt_path = PROTOTXT_ALT_PATH
         elif not prototxt_path.exists():
-            st.info("📥 Downloading model configuration...")
+            add_console_message("Downloading model configuration...", "download")
+            add_console_message(f"Downloading {PROTOTXT_URL}...", "info")
             download_file(PROTOTXT_URL, PROTOTXT_LOCAL_PATH, expected_size=29353)
+            add_console_message("Downloaded MobileNetSSD_deploy.prototxt.txt", "success")
         
-        st.success(f"✅ Loading model from: {prototxt_path}")
+        add_console_message(f"Loading model from: {prototxt_path.name}", "info")
         net = cv2.dnn.readNetFromCaffe(str(prototxt_path), str(MODEL_LOCAL_PATH))
         
         # Test the model with a dummy input
@@ -572,13 +582,13 @@ def load_model():
         net.setInput(dummy_blob)
         test_output = net.forward()
         
-        st.success(f"✅ Model loaded successfully! Output shape: {test_output.shape}")
+        add_console_message(f"Model loaded successfully! Output shape: {test_output.shape}", "success")
         return net
         
     except Exception as e:
-        st.error(f"❌ Error loading model: {e}")
-        st.error(f"Model path: {MODEL_LOCAL_PATH}")
-        st.error(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}")
+        add_console_message(f"Error loading model: {e}", "error")
+        add_console_message(f"Model path: {MODEL_LOCAL_PATH}", "error")
+        add_console_message(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}", "error")
         return None
 
 def get_local_ip():
@@ -613,6 +623,55 @@ if net is None:
 st.title("🎯 AdMyVision - Real-time Object Detection")
 st.markdown("### 🚀 AI-Powered Object Detection with Voice Announcements")
 st.markdown("---")
+
+# Console-like UI for system status and model loading
+st.markdown("#### 💻 System Console")
+console_container = st.container()
+
+with console_container:
+    console_placeholder = st.empty()
+    
+    # Initialize console messages if not in session state
+    if 'console_messages' not in st.session_state:
+        st.session_state.console_messages = []
+    
+    def add_console_message(message, msg_type="info"):
+        """Add a message to the console with timestamp"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        if msg_type == "info":
+            icon = "ℹ️"
+        elif msg_type == "success":
+            icon = "✅"
+        elif msg_type == "download":
+            icon = "📥"
+        elif msg_type == "error":
+            icon = "❌"
+        else:
+            icon = "▶️"
+            
+        formatted_message = f"[{timestamp}] {icon} {message}"
+        st.session_state.console_messages.append(formatted_message)
+        
+        # Keep only last 10 messages
+        if len(st.session_state.console_messages) > 10:
+            st.session_state.console_messages = st.session_state.console_messages[-10:]
+    
+    # Display console messages in a code block
+    if st.session_state.console_messages:
+        console_text = "\n".join(st.session_state.console_messages[-8:])  # Show last 8 messages
+        console_placeholder.code(console_text, language="bash")
+    else:
+        console_placeholder.code("[00:00:00] ▶️ System ready - waiting for initialization...", language="bash")
+
+# Add initial system messages
+if 'console_initialized' not in st.session_state:
+    add_console_message("AdMyVision System Starting...", "info")
+    add_console_message(f"Python Runtime: {platform.python_version()}", "info")
+    add_console_message(f"OpenCV Version: {cv2.__version__}", "info")
+    add_console_message(f"Voice Engine: {'Browser Speech Synthesis' if GTTS_AVAILABLE else 'Disabled'}", "info")
+    st.session_state.console_initialized = True
 st.markdown("---")
 
 # Initialize session state
@@ -870,140 +929,26 @@ if mode == "PC Camera":
         )
     
     with col2:
-        # Real-time status container
-        status_container = st.container()
+        # Simple status display
+        st.subheader("📊 Detection Status")
         
-        with status_container:
-            st.subheader("📊 Live Status")
-            
-            # Camera status with auto-refresh
-            camera_status = webrtc_ctx.state.playing if webrtc_ctx else False
-            if camera_status:
-                st.success("✅ Camera Active")
-            else:
-                st.error("❌ Camera Inactive")
-            
-            # Real-time metrics in columns
-            metric_col1, metric_col2 = st.columns(2)
-            
-            with metric_col1:
-                frame_count = getattr(st.session_state, 'frame_count', 0)
-                st.metric("📹 Frames", frame_count)
-                
-            with metric_col2:
-                # Get queue size for real-time monitoring
-                queue_size = result_queue.qsize() if result_queue else 0
-                st.metric("📊 Queue", queue_size)
-            
-            # Model and threshold status
-            if net is not None:
-                st.success(f"✅ Model Ready | 🎯 Threshold: {score_threshold:.2f}")
-            else:
-                st.error("❌ Model Failed to Load")
+        # Camera status
+        camera_status = webrtc_ctx.state.playing if webrtc_ctx else False
+        if camera_status:
+            st.success("✅ Camera Active - Detection Running")
+        else:
+            st.info("📹 Camera Inactive - Click Start to begin")
         
-        # Separate detection results container with auto-update
-        detections_container = st.container()
+        # Model status
+        if net is not None:
+            st.success(f"✅ Model Ready | 🎯 Threshold: {score_threshold:.2f}")
+        else:
+            st.error("❌ Model Failed to Load")
         
-        with detections_container:
-            st.subheader("🔍 Live Detections")
-        
-            # Real-time detection processing
-            current_detections = []
-            detection_count = 0
-            total_count = 0
-            
-            # Process detection queue with error handling
-            try:
-                # Get the latest detection data
-                latest_data = None
-                while not result_queue.empty():
-                    latest_data = result_queue.get_nowait()
-                
-                if latest_data:
-                    if isinstance(latest_data, dict):
-                        current_detections = latest_data.get('detections', [])
-                        detection_count = latest_data.get('current_count', len(current_detections))
-                        total_count = latest_data.get('total_count', 0)
-                        # Update session state
-                        st.session_state.detections = current_detections
-                        st.session_state.frame_count = latest_data.get('frame_count', st.session_state.frame_count)
-                    else:
-                        current_detections = latest_data if latest_data else []
-                        detection_count = len(current_detections)
-                        st.session_state.detections = current_detections
-                else:
-                    # Use cached detections if no new data
-                    current_detections = getattr(st.session_state, 'detections', [])
-                    detection_count = len(current_detections)
-                    
-            except Exception as e:
-                st.error(f"Detection processing error: {e}")
-                current_detections = []
-                detection_count = 0
-            
-            # Live statistics
-            stats_col1, stats_col2 = st.columns(2)
-            with stats_col1:
-                st.metric("🎯 Current Objects", detection_count)
-            with stats_col2:
-                st.metric("📈 Total Found", total_count)
-            
-            # Reset button
-            if st.button("🔄 Reset Counter", help="Reset total detection counter"):
-                if 'detector' in locals():
-                    detector.reset_total_count()
-                st.rerun()
-            
-            # Live detection list
-            if current_detections and camera_status:
-                st.write("**🔴 Live Detections:**")
-                
-                for i, detection in enumerate(current_detections[:5]):
-                    try:
-                        # Confidence color coding
-                        if detection.score > 0.7:
-                            conf_color = "�"
-                        elif detection.score > 0.5:
-                            conf_color = "�"
-                        else:
-                            conf_color = "🔴"
-                        
-                        # Calculate distance
-                        bbox_area = (detection.box[2] - detection.box[0]) * (detection.box[3] - detection.box[1])
-                        distance = detector.estimate_distance(bbox_area, detection.label)
-                        
-                        # Display detection info
-                        st.write(f"{i+1}. {conf_color} **{detection.label.title()}** "
-                                f"({detection.score:.0%}) at ~{distance:.1f}m")
-                        
-                    except Exception as e:
-                        st.write(f"{i+1}. ⚠️ Detection error: {e}")
-                
-                if len(current_detections) > 5:
-                    st.info(f"➕ {len(current_detections) - 5} more objects detected")
-                    
-            elif camera_status:
-                st.info("�️ **Scanning for objects...**\n"
-                       "Point camera at: Person, Car, Bottle, Chair, Phone, etc.")
-            else:
-                st.warning("📹 **Camera not active**\n"
-                          "Click the camera button to start detection")
-            
-            # Auto-refresh for real-time updates
-            if camera_status:
-                time.sleep(0.2)  # Refresh every 200ms when camera is active
-            
-        # Debug information
-        if st.checkbox("🔧 Debug Info"):
-            st.write(f"Model loaded: {net is not None}")
-            st.write(f"Threshold: {score_threshold}")
-            st.write(f"Frame count: {st.session_state.frame_count}")
-            st.write(f"Queue size: {result_queue.qsize()}")
-            st.write(f"Session detections: {len(st.session_state.get('detections', []))}")
-            st.write(f"Latest detections: {len(latest_detections)}")
-        
-        # Auto-refresh to keep status updated
-        time.sleep(0.1)  # Small delay to prevent excessive CPU usage
+        # Simple detection display
+        if camera_status:
+            st.info("� **Scanning for objects...**\n"
+                   "Point camera at: Person, Car, Bottle, Chair, Phone, etc.")
 
 elif mode == "Phone Camera (WebRTC)":
     st.subheader("📱 Phone Camera Detection")
