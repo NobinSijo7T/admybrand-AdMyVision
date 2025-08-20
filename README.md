@@ -40,7 +40,13 @@ docker-compose up --build
 
 ## 🎯 Live Demo
 
-<iframe src="https://share.streamlit.io/whitphx/streamlit-webrtc-example/main/app.py" width="100%" height="600" frameborder="0"></iframe>
+<video width="100%" height="400" controls autoplay muted>
+  <source src="demo-video.mp4" type="video/mp4">
+  <source src="demo-video.webm" type="video/webm">
+  Your browser does not support the video tag.
+</video>
+
+*Demo showing real-time object detection with WebRTC streaming*
 
 ## 📊 Benchmarking
 
