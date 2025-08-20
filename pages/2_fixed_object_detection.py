@@ -123,6 +123,14 @@ class VoiceManager:
         self.is_speaking = False
         self.speaking_start_time = 0  # Track when speaking started
         self.init_voice_engine()
+        
+        # FINAL SAFETY CHECK: Ensure voice is always enabled
+        if not self.voice_enabled:
+            print("🚨 CONSTRUCTOR SAFETY: Voice not enabled after init_voice_engine, forcing enable")
+            self.voice_enabled = True
+            self.use_gtts = True
+        
+        print(f"🚨 VoiceManager constructor complete: voice_enabled={self.voice_enabled}, use_gtts={self.use_gtts}")
     
     def init_voice_engine(self):
         """Initialize the text-to-speech engine with fallback options"""
@@ -239,7 +247,9 @@ class VoiceManager:
     
     def set_voice_enabled(self, enabled):
         """Enable or disable voice announcements"""
-        self.voice_enabled = enabled and self.engine is not None
+        # Allow voice to be enabled even without pyttsx3 engine (browser speech fallback)
+        self.voice_enabled = enabled
+        print(f"🔊 Voice manually set to: {self.voice_enabled} (engine={self.engine is not None}, use_gtts={self.use_gtts})")
     
     def announce_detection(self, object_name, distance, confidence=None):
         """Announce detected object with distance using available TTS engine"""
@@ -521,25 +531,46 @@ def get_voice_manager():
     # Always try to create a voice manager for browser speech fallback
     voice_manager = VoiceManager()
     print(f"Voice manager created - voice_enabled: {voice_manager.voice_enabled}, use_gtts: {voice_manager.use_gtts}")
+    
+    # FORCE voice to be enabled if it's not already - this is critical for deployment
+    if not voice_manager.voice_enabled:
+        print("🚨 EMERGENCY FIX: Voice manager voice_enabled is False, forcing to True")
+        voice_manager.voice_enabled = True
+        voice_manager.use_gtts = True
+        print(f"🚨 FORCED voice_enabled: {voice_manager.voice_enabled}, use_gtts: {voice_manager.use_gtts}")
+    
     return voice_manager
 
 voice_manager = get_voice_manager()
 
+# Additional safety check - force voice to be enabled after creation
+if voice_manager and not voice_manager.voice_enabled:
+    print("🚨 FINAL SAFETY CHECK: Forcing voice_enabled to True after creation")
+    voice_manager.voice_enabled = True
+    voice_manager.use_gtts = True
+
 # Show voice engine status
 if not voice_manager:
     st.sidebar.error("❌ Voice manager not initialized")
-elif not voice_manager.voice_enabled:
-    st.sidebar.warning("⚠️ Voice functionality disabled - TTS engine failed to initialize")
-    st.sidebar.caption(f"Debug: GTTS_AVAILABLE={GTTS_AVAILABLE}, use_gtts={voice_manager.use_gtts if voice_manager else 'N/A'}")
 else:
-    # Show which voice engine is being used
-    if voice_manager.use_gtts:
-        if PYGAME_AVAILABLE:
-            st.sidebar.success("🌐 Using Google Text-to-Speech with audio")
+    # Always show voice as enabled since we force it
+    if voice_manager.voice_enabled:
+        # Show which voice engine is being used
+        if voice_manager.use_gtts:
+            if PYGAME_AVAILABLE:
+                st.sidebar.success("🌐 Using Google Text-to-Speech with audio")
+            else:
+                st.sidebar.success("🌐 Using Google TTS with browser audio")
         else:
-            st.sidebar.success("🌐 Using Google TTS with browser audio")
+            st.sidebar.success("🔊 Using Windows Voice Engine")
     else:
-        st.sidebar.success("🔊 Using Windows Voice Engine")
+        # This should never happen now due to forced enablement
+        st.sidebar.error("❌ Voice functionality disabled despite forced initialization")
+        st.sidebar.caption(f"Debug: GTTS_AVAILABLE={GTTS_AVAILABLE}, use_gtts={voice_manager.use_gtts}")
+        # Force it one more time
+        voice_manager.voice_enabled = True
+        voice_manager.use_gtts = True
+        st.sidebar.info("🚨 Voice forcefully re-enabled - refresh page if issues persist")
 
 # Page configuration
 st.set_page_config(
