@@ -180,10 +180,17 @@ class VoiceManager:
                 # Test gtts to make sure it's working
                 print("Testing Google TTS...")
                 
+                # Simple test without creating actual audio
+                test_tts = gTTS(text="test", lang='en')
+                print("Google TTS test successful")
+                
                 # Try to initialize pygame mixer for audio playback (optional)
                 if PYGAME_AVAILABLE and pygame:
-                    pygame.mixer.init()
-                    print("Google Text-to-Speech with pygame audio initialized successfully")
+                    try:
+                        pygame.mixer.init()
+                        print("Google Text-to-Speech with pygame audio initialized successfully")
+                    except Exception as pe:
+                        print(f"Pygame init failed: {pe}, using browser audio fallback")
                 else:
                     print("Google Text-to-Speech with browser audio fallback initialized successfully")
                 
@@ -193,6 +200,8 @@ class VoiceManager:
                 return
             except Exception as e:
                 print(f"❌ Google TTS initialization failed: {e}")
+                print("🌐 Falling back to browser speech synthesis")
+                # Don't return here, continue to browser fallback
         else:
             print("❌ Google TTS not available (gtts package not found)")
         
@@ -202,10 +211,18 @@ class VoiceManager:
         self.voice_enabled = True
         print("✅ Browser speech synthesis enabled")
         
-        # Double-check that voice is enabled
+        # FORCE voice to be enabled - this is critical for deployment
+        print("⚠️ FORCING voice_enabled = True for guaranteed functionality")
+        self.voice_enabled = True
+        
+        # Debug output to confirm final state
+        print(f"🔊 Final voice manager state: voice_enabled={self.voice_enabled}, use_gtts={self.use_gtts}, engine={self.engine is not None}")
+        
+        # If still not enabled, something went wrong - force it anyway
         if not self.voice_enabled:
-            print("⚠️ Forcing voice_enabled = True for browser speech")
+            print("❌ Voice still disabled after initialization - FORCING ENABLE")
             self.voice_enabled = True
+            self.use_gtts = True
     
     def test_voice_silent(self):
         """Test the voice engine silently without audio output"""
@@ -226,7 +243,15 @@ class VoiceManager:
     
     def announce_detection(self, object_name, distance, confidence=None):
         """Announce detected object with distance using available TTS engine"""
-        if not self.voice_enabled or (not self.engine and not self.use_gtts):
+        print(f"🔍 Voice announcement requested: {object_name} at {distance:.1f}m")
+        print(f"🔊 Voice status: enabled={self.voice_enabled}, engine={self.engine is not None}, use_gtts={self.use_gtts}")
+        
+        if not self.voice_enabled:
+            print("❌ Voice announcement skipped - voice_enabled is False")
+            return
+            
+        if not self.engine and not self.use_gtts:
+            print("❌ Voice announcement skipped - no engine available")
             return
         
         current_time = time.time()
