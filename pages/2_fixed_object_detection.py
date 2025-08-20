@@ -79,7 +79,29 @@ except ImportError:
 import tempfile
 import os
 
-from sample_utils.download import download_file
+# Try to import download utility
+try:
+    from sample_utils.download import download_file
+except ImportError:
+    # Fallback download function
+    import urllib.request
+    def download_file(url, download_to, expected_size=None):
+        """Simple download function fallback"""
+        if download_to.exists():
+            if expected_size and download_to.stat().st_size == expected_size:
+                return
+            elif not expected_size:
+                return
+        
+        download_to.parent.mkdir(parents=True, exist_ok=True)
+        st.info(f"Downloading {url}...")
+        
+        try:
+            urllib.request.urlretrieve(url, download_to)
+            st.success(f"Downloaded {download_to.name}")
+        except Exception as e:
+            st.error(f"Download failed: {e}")
+            raise
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
