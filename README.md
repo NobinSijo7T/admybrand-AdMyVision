@@ -40,7 +40,7 @@ docker-compose up --build
 
 ## 🎯 Live Demo
 
-Check out the live demo here: [https://share.streamlit.io/whitphx/streamlit-webrtc-example/main/app.py](https://share.streamlit.io/whitphx/streamlit-webrtc-example/main/app.py)
+<iframe src="https://share.streamlit.io/whitphx/streamlit-webrtc-example/main/app.py" width="100%" height="600" frameborder="0"></iframe>
 
 ## 📊 Benchmarking
 
