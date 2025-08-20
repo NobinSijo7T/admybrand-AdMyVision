@@ -1,3 +1,12 @@
+<div align="center" style="margin-bottom: 20px;">
+  <a href="https://admy-sense-web.vercel.app/" style="text-decoration: none; margin-right: 10px;">
+    <img src="https://img.shields.io/badge/Visit%20Website-AdMySense-blue?style=for-the-badge&logo=vercel" alt="Visit Website"/>
+  </a>
+  <a href="https://nobinsijo7t-admybrand-admy-pages2-fixed-object-detection-dqerbk.streamlit.app/" style="text-decoration: none;">
+    <img src="https://img.shields.io/badge/Deployed%20App-Streamlit-success?style=for-the-badge&logo=streamlit" alt="Deployed App"/>
+  </a>
+</div>
+
 # AdMySense
 ### *Advanced Detection for My Senses - Real-Time WebRTC Multi-Object Detection*
 
