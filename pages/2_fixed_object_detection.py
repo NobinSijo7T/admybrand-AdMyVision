@@ -2,32 +2,16 @@
 Fixed version addressing video freezing and mobile connection issues.
 """
 
-import streamlit as st
-
-# Page configuration for standalone deployment
-st.set_page_config(
-    page_title="AdMyVision - Object Detection",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 import logging
 import queue
 import time
 import threading
-import platform
 from pathlib import Path
 from typing import List, NamedTuple
 import socket
 
 import av
-try:
-    import cv2
-except ImportError:
-    st.error("❌ OpenCV not installed. Please install opencv-python-headless")
-    st.stop()
-
+import cv2
 import numpy as np
 import qrcode
 import streamlit as st
@@ -38,14 +22,7 @@ from streamlit_webrtc import (
     webrtc_streamer,
     __version__ as st_webrtc_version,
 )
-import streamlit.components.v1 as components
-try:
-    import aiortc
-    AIORTC_AVAILABLE = True
-except ImportError:
-    aiortc = None
-    AIORTC_AVAILABLE = False
-    print("aiortc not available - WebRTC functionality may be limited")
+import aiortc
 
 # Try to import pyttsx3 with proper error handling
 try:
@@ -53,60 +30,19 @@ try:
     import pythoncom  # For Windows COM initialization
     VOICE_AVAILABLE = True
 except ImportError:
-    pyttsx3 = None
-    pythoncom = None
     VOICE_AVAILABLE = False
-    print("pyttsx3 not available - voice synthesis will use browser/gtts fallback")
 
 # Try to import Google Text-to-Speech as fallback
 try:
     from gtts import gTTS
+    import pygame
+    import tempfile
+    import os
     GTTS_AVAILABLE = True
 except ImportError:
-    gTTS = None
     GTTS_AVAILABLE = False
-    print("gtts not available - voice synthesis will use browser fallback")
 
-# Try to import pygame for audio playback
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    pygame = None
-    PYGAME_AVAILABLE = False
-    print("pygame not available - audio playback will use browser fallback")
-
-# Additional imports
-import tempfile
-import os
-import queue
-
-# Global voice announcement queue
-voice_queue = queue.Queue()
-
-# Try to import download utility
-try:
-    from sample_utils.download import download_file
-except ImportError:
-    # Fallback download function
-    import urllib.request
-    def download_file(url, download_to, expected_size=None):
-        """Simple download function fallback"""
-        if download_to.exists():
-            if expected_size and download_to.stat().st_size == expected_size:
-                return
-            elif not expected_size:
-                return
-        
-        download_to.parent.mkdir(parents=True, exist_ok=True)
-        st.info(f"Downloading {url}...")
-        
-        try:
-            urllib.request.urlretrieve(url, download_to)
-            st.success(f"Downloaded {download_to.name}")
-        except Exception as e:
-            st.error(f"Download failed: {e}")
-            raise
+from sample_utils.download import download_file
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
@@ -127,22 +63,14 @@ class VoiceManager:
         self.is_speaking = False
         self.speaking_start_time = 0  # Track when speaking started
         self.init_voice_engine()
-        
-        # FINAL SAFETY CHECK: Ensure voice is always enabled
-        if not self.voice_enabled:
-            print("🚨 CONSTRUCTOR SAFETY: Voice not enabled after init_voice_engine, forcing enable")
-            self.voice_enabled = True
-            self.use_gtts = True
-        
-        print(f"🚨 VoiceManager constructor complete: voice_enabled={self.voice_enabled}, use_gtts={self.use_gtts}")
     
     def init_voice_engine(self):
         """Initialize the text-to-speech engine with fallback options"""
-        # Try pyttsx3 first (only if available)
-        if VOICE_AVAILABLE and pyttsx3:
+        # Try pyttsx3 first
+        if VOICE_AVAILABLE:
             try:
                 # Initialize COM for Windows
-                if pythoncom and hasattr(pythoncom, 'CoInitialize'):
+                if hasattr(pythoncom, 'CoInitialize'):
                     pythoncom.CoInitialize()
                 
                 # Try different driver options for better Windows compatibility
@@ -177,7 +105,6 @@ class VoiceManager:
                     self.engine.setProperty('rate', 160)  # Slightly faster speech
                     self.engine.setProperty('volume', 1.0)  # Maximum volume
                     
-                    self.voice_enabled = True  # Enable voice functionality
                     print("pyttsx3 voice engine initialized successfully")
                     return
                     
@@ -185,56 +112,18 @@ class VoiceManager:
                 print(f"pyttsx3 initialization failed: {e}")
                 self.engine = None
         
-        # Fallback to Google TTS if pyttsx3 fails (even without pygame)
-        print(f"Checking Google TTS: GTTS_AVAILABLE={GTTS_AVAILABLE}")
+        # Fallback to Google TTS if pyttsx3 fails
         if GTTS_AVAILABLE:
             try:
-                # Test gtts to make sure it's working
-                print("Testing Google TTS...")
-                
-                # Simple test without creating actual audio
-                test_tts = gTTS(text="test", lang='en')
-                print("Google TTS test successful")
-                
-                # Try to initialize pygame mixer for audio playback (optional)
-                if PYGAME_AVAILABLE and pygame:
-                    try:
-                        pygame.mixer.init()
-                        print("Google Text-to-Speech with pygame audio initialized successfully")
-                    except Exception as pe:
-                        print(f"Pygame init failed: {pe}, using browser audio fallback")
-                else:
-                    print("Google Text-to-Speech with browser audio fallback initialized successfully")
-                
+                # Initialize pygame mixer for audio playback
+                pygame.mixer.init()
                 self.use_gtts = True
-                self.voice_enabled = True
-                print("✅ Google TTS voice engine enabled successfully")
+                print("Google Text-to-Speech fallback initialized successfully")
                 return
             except Exception as e:
-                print(f"❌ Google TTS initialization failed: {e}")
-                print("🌐 Falling back to browser speech synthesis")
-                # Don't return here, continue to browser fallback
-        else:
-            print("❌ Google TTS not available (gtts package not found)")
+                print(f"Google TTS initialization failed: {e}")
         
-        # Final fallback - always enable browser speech
-        print("🌐 Enabling browser speech synthesis as final fallback")
-        self.use_gtts = True
-        self.voice_enabled = True
-        print("✅ Browser speech synthesis enabled")
-        
-        # FORCE voice to be enabled - this is critical for deployment
-        print("⚠️ FORCING voice_enabled = True for guaranteed functionality")
-        self.voice_enabled = True
-        
-        # Debug output to confirm final state
-        print(f"🔊 Final voice manager state: voice_enabled={self.voice_enabled}, use_gtts={self.use_gtts}, engine={self.engine is not None}")
-        
-        # If still not enabled, something went wrong - force it anyway
-        if not self.voice_enabled:
-            print("❌ Voice still disabled after initialization - FORCING ENABLE")
-            self.voice_enabled = True
-            self.use_gtts = True
+        print("No voice engine available - both pyttsx3 and Google TTS failed")
     
     def test_voice_silent(self):
         """Test the voice engine silently without audio output"""
@@ -251,21 +140,11 @@ class VoiceManager:
     
     def set_voice_enabled(self, enabled):
         """Enable or disable voice announcements"""
-        # Allow voice to be enabled even without pyttsx3 engine (browser speech fallback)
-        self.voice_enabled = enabled
-        print(f"🔊 Voice manually set to: {self.voice_enabled} (engine={self.engine is not None}, use_gtts={self.use_gtts})")
+        self.voice_enabled = enabled and self.engine is not None
     
     def announce_detection(self, object_name, distance, confidence=None):
         """Announce detected object with distance using available TTS engine"""
-        print(f"🔍 Voice announcement requested: {object_name} at {distance:.1f}m")
-        print(f"🔊 Voice status: enabled={self.voice_enabled}, engine={self.engine is not None}, use_gtts={self.use_gtts}")
-        
-        if not self.voice_enabled:
-            print("❌ Voice announcement skipped - voice_enabled is False")
-            return
-            
-        if not self.engine and not self.use_gtts:
-            print("❌ Voice announcement skipped - no engine available")
+        if not self.voice_enabled or (not self.engine and not self.use_gtts):
             return
         
         current_time = time.time()
@@ -313,10 +192,11 @@ class VoiceManager:
         announcement = f"Detected {object_name} at {distance_text}"
         print(f"Voice announcement: {announcement}")  # Debug output
         
-        # ALWAYS use browser speech synthesis for maximum compatibility
-        # This ensures voice works on all platforms including mobile and web deployment
-        print("🌐 Using browser speech synthesis for maximum compatibility")
-        self._speak_with_browser(announcement)
+        # Choose TTS method based on available engine
+        if self.use_gtts:
+            self._speak_with_gtts(announcement)
+        else:
+            self._speak_with_pyttsx3(announcement)
     
     def _speak_with_pyttsx3(self, text):
         """Speak using pyttsx3 engine with simple, reliable approach"""
@@ -405,158 +285,8 @@ class VoiceManager:
         thread = threading.Thread(target=speak, daemon=True)
         thread.start()
     
-    def _speak_with_browser(self, text):
-        """Use browser's speech synthesis with user interaction handling"""
-        try:
-            # Escape text for JavaScript to prevent injection issues
-            escaped_text = text.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
-            
-            # Create a unique ID for this speech request
-            import random
-            speech_id = f"speech_{random.randint(1000, 9999)}"
-            
-            # Enhanced JavaScript speech synthesis
-            speech_js = f"""
-            <div id="{speech_id}" style="position: relative; height: 1px;">
-                <script>
-                (function() {{
-                    console.log('🎤 Browser speech synthesis initializing for: {escaped_text}');
-                    
-                    // Check if speech synthesis is supported
-                    if (!('speechSynthesis' in window)) {{
-                        console.error('❌ Speech synthesis not supported in this browser');
-                        return;
-                    }}
-                    
-                    // Function to speak the text
-                    function speakNow() {{
-                        try {{
-                            console.log('🔊 Speaking now: {escaped_text}');
-                            
-                            // Cancel any ongoing speech
-                            speechSynthesis.cancel();
-                            
-                            // Small delay to ensure cancellation
-                            setTimeout(function() {{
-                                // Create utterance
-                                var utterance = new SpeechSynthesisUtterance('{escaped_text}');
-                                utterance.rate = 0.8;
-                                utterance.pitch = 1.0;
-                                utterance.volume = 1.0;
-                                utterance.lang = 'en-US';
-                                
-                                // Get available voices
-                                var voices = speechSynthesis.getVoices();
-                                console.log('📢 Available voices:', voices.length);
-                                
-                                // Select the best voice
-                                if (voices.length > 0) {{
-                                    var selectedVoice = voices.find(voice => 
-                                        voice.lang === 'en-US' && voice.localService === false
-                                    ) || voices.find(voice => 
-                                        voice.lang.startsWith('en')
-                                    ) || voices[0];
-                                    
-                                    if (selectedVoice) {{
-                                        utterance.voice = selectedVoice;
-                                        console.log('🎯 Selected voice:', selectedVoice.name, selectedVoice.lang);
-                                    }}
-                                }}
-                                
-                                // Event handlers
-                                utterance.onstart = function() {{
-                                    console.log('✅ Speech started: {escaped_text}');
-                                }};
-                                
-                                utterance.onend = function() {{
-                                    console.log('🏁 Speech completed: {escaped_text}');
-                                }};
-                                
-                                utterance.onerror = function(event) {{
-                                    console.error('❌ Speech error:', event.error, event);
-                                }};
-                                
-                                // Speak the text
-                                speechSynthesis.speak(utterance);
-                                console.log('🚀 Speech synthesis initiated successfully');
-                                
-                            }}, 100);
-                            
-                        }} catch (error) {{
-                            console.error('❌ Error in speakNow:', error);
-                        }}
-                    }}
-                    
-                    // Function to handle voices loading
-                    function handleVoicesLoaded() {{
-                        console.log('🔄 Voices loaded, attempting to speak...');
-                        speakNow();
-                    }}
-                    
-                    // Wait for voices to load if needed
-                    var voices = speechSynthesis.getVoices();
-                    if (voices.length === 0) {{
-                        console.log('⏳ Waiting for voices to load...');
-                        speechSynthesis.addEventListener('voiceschanged', handleVoicesLoaded, {{ once: true }});
-                        
-                        // Fallback timeout
-                        setTimeout(function() {{
-                            console.log('⚠️ Voices loading timeout, attempting anyway...');
-                            speakNow();
-                        }}, 2000);
-                    }} else {{
-                        console.log('✅ Voices already available, speaking immediately');
-                        speakNow();
-                    }}
-                    
-                    // Create a click trigger for user interaction
-                    function createClickTrigger() {{
-                        var existingTrigger = document.getElementById('voice-trigger');
-                        if (!existingTrigger) {{
-                            var trigger = document.createElement('div');
-                            trigger.id = 'voice-trigger';
-                            trigger.style.cssText = 'position: fixed; top: -1px; left: -1px; width: 1px; height: 1px; opacity: 0; pointer-events: none;';
-                            trigger.onclick = function() {{
-                                console.log('🖱️ User interaction detected, enabling speech...');
-                                speakNow();
-                            }};
-                            document.body.appendChild(trigger);
-                            
-                            // Simulate click if needed
-                            setTimeout(function() {{
-                                trigger.click();
-                            }}, 500);
-                        }}
-                    }}
-                    
-                    // Ensure user interaction if required
-                    createClickTrigger();
-                    
-                }})();
-                </script>
-            </div>
-            """
-            
-            # Display the JavaScript component with minimal height
-            components.html(speech_js, height=1)
-            print(f"🎤 Browser speech synthesis requested: {text}")
-            
-        except Exception as e:
-            print(f"❌ Browser speech synthesis error: {e}")
-
     def _speak_with_gtts(self, text):
         """Speak using Google Text-to-Speech with proper state management"""
-        if not GTTS_AVAILABLE or not gTTS:
-            print("Google TTS not available, using browser speech synthesis")
-            self._speak_with_browser(text)
-            return
-        
-        # If pygame is not available, use browser speech directly 
-        if not PYGAME_AVAILABLE or not pygame:
-            print("Pygame not available, using browser speech for audio playback")
-            self._speak_with_browser(text)
-            return
-            
         def speak():
             try:
                 # Set speaking flag
@@ -566,13 +296,11 @@ class VoiceManager:
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
                     temp_filename = temp_file.name
                 
-                print(f"Generating Google TTS audio for: {text}")
                 # Generate speech with Google TTS
                 tts = gTTS(text=text, lang='en', slow=False)
                 tts.save(temp_filename)
                 
-                print(f"Playing Google TTS audio with pygame...")
-                # Play the audio file with pygame
+                # Play the audio file
                 pygame.mixer.music.load(temp_filename)
                 pygame.mixer.music.play()
                 
@@ -580,21 +308,12 @@ class VoiceManager:
                 while pygame.mixer.music.get_busy():
                     time.sleep(0.1)
                 
-                print(f"Successfully announced with Google TTS + pygame: {text}")
-                
                 # Clean up temporary file
-                try:
-                    os.unlink(temp_filename)
-                except:
-                    pass  # Ignore cleanup errors
+                os.unlink(temp_filename)
+                print(f"Successfully announced with Google TTS: {text}")
                 
             except Exception as e:
                 print(f"Google TTS announcement failed: {e}")
-                # Fallback to browser speech if Google TTS fails
-                print("Falling back to browser speech synthesis...")
-                self.is_speaking = False  # Reset flag before fallback
-                self._speak_with_browser(text)
-                return
             finally:
                 # Always clear the speaking flag
                 self.is_speaking = False
@@ -603,143 +322,6 @@ class VoiceManager:
         thread = threading.Thread(target=speak, daemon=True)
         thread.start()
     
-    def test_voice_with_interaction(self, test_text="Voice test successful"):
-        """Test voice with user interaction trigger for browser compatibility"""
-        print(f"🎯 Testing voice with user interaction: {test_text}")
-        
-        # Create a more robust browser speech test
-        self._speak_with_browser_test(test_text)
-    
-    def _speak_with_browser_test(self, text):
-        """Enhanced browser speech test with user interaction handling"""
-        try:
-            # Escape text for JavaScript
-            escaped_text = text.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
-            
-            # Create unique ID for this test
-            import random
-            test_id = f"voice_test_{random.randint(1000, 9999)}"
-            
-            # Enhanced test with user interaction
-            test_js = f"""
-            <div id="{test_id}" style="position: relative; height: 20px; margin: 5px 0;">
-                <button id="voice-test-btn-{test_id}" style="
-                    background: linear-gradient(45deg, #4CAF50, #45a049);
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 12px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                    transition: all 0.3s ease;
-                " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                    🔊 Click to Test Voice
-                </button>
-                
-                <script>
-                (function() {{
-                    console.log('🎯 Voice test component initialized');
-                    
-                    var testBtn = document.getElementById('voice-test-btn-{test_id}');
-                    var hasSpoken = false;
-                    
-                    function performVoiceTest() {{
-                        if (hasSpoken) return;
-                        hasSpoken = true;
-                        
-                        console.log('🔊 Performing voice test with user interaction');
-                        
-                        if (!('speechSynthesis' in window)) {{
-                            console.error('❌ Speech synthesis not supported');
-                            testBtn.textContent = '❌ Speech Not Supported';
-                            testBtn.style.background = '#f44336';
-                            return;
-                        }}
-                        
-                        try {{
-                            // Cancel any ongoing speech
-                            speechSynthesis.cancel();
-                            
-                            setTimeout(function() {{
-                                var utterance = new SpeechSynthesisUtterance('{escaped_text}');
-                                utterance.rate = 0.8;
-                                utterance.pitch = 1.0;
-                                utterance.volume = 1.0;
-                                utterance.lang = 'en-US';
-                                
-                                // Get and select best voice
-                                var voices = speechSynthesis.getVoices();
-                                if (voices.length > 0) {{
-                                    var bestVoice = voices.find(v => v.lang === 'en-US' && !v.localService) ||
-                                                   voices.find(v => v.lang.startsWith('en')) ||
-                                                   voices[0];
-                                    if (bestVoice) {{
-                                        utterance.voice = bestVoice;
-                                        console.log('🎯 Using voice:', bestVoice.name);
-                                    }}
-                                }}
-                                
-                                // Event handlers
-                                utterance.onstart = function() {{
-                                    console.log('✅ Voice test started successfully');
-                                    testBtn.textContent = '🔊 Speaking...';
-                                    testBtn.style.background = '#2196F3';
-                                }};
-                                
-                                utterance.onend = function() {{
-                                    console.log('✅ Voice test completed successfully');
-                                    testBtn.textContent = '✅ Voice Test Passed';
-                                    testBtn.style.background = '#4CAF50';
-                                }};
-                                
-                                utterance.onerror = function(event) {{
-                                    console.error('❌ Voice test failed:', event.error);
-                                    testBtn.textContent = '❌ Voice Test Failed';
-                                    testBtn.style.background = '#f44336';
-                                }};
-                                
-                                // Speak the test
-                                speechSynthesis.speak(utterance);
-                                console.log('🚀 Voice test speech initiated');
-                                
-                            }}, 100);
-                            
-                        }} catch (error) {{
-                            console.error('❌ Voice test exception:', error);
-                            testBtn.textContent = '❌ Test Failed';
-                            testBtn.style.background = '#f44336';
-                        }}
-                    }}
-                    
-                    // Click handler
-                    testBtn.onclick = performVoiceTest;
-                    
-                    // Auto-trigger after a delay (may not work due to user interaction requirement)
-                    setTimeout(function() {{
-                        if (!hasSpoken) {{
-                            console.log('⚡ Auto-triggering voice test...');
-                            performVoiceTest();
-                        }}
-                    }}, 1000);
-                    
-                }})();
-                </script>
-            </div>
-            """
-            
-            # Display with proper height
-            components.html(test_js, height=50)
-            print(f"🎯 Voice test component created: {text}")
-            
-        except Exception as e:
-            print(f"❌ Voice test component error: {e}")
-    
-    def test_voice_simple(self, test_text="Voice test successful"):
-        """Simple voice test using browser speech synthesis"""
-        print(f"🎯 Testing voice: {test_text}")
-        self._speak_with_browser(test_text)
-        
     def reset_speaking_state(self):
         """Force reset the speaking state - useful for debugging"""
         self.is_speaking = False
@@ -761,51 +343,22 @@ class VoiceManager:
 @st.cache_resource
 def get_voice_manager():
     """Get a cached voice manager instance"""
-    print(f"Creating voice manager - VOICE_AVAILABLE: {VOICE_AVAILABLE}, GTTS_AVAILABLE: {GTTS_AVAILABLE}")
-    
-    # Always try to create a voice manager for browser speech fallback
-    voice_manager = VoiceManager()
-    print(f"Voice manager created - voice_enabled: {voice_manager.voice_enabled}, use_gtts: {voice_manager.use_gtts}")
-    
-    # FORCE voice to be enabled if it's not already - this is critical for deployment
-    if not voice_manager.voice_enabled:
-        print("🚨 EMERGENCY FIX: Voice manager voice_enabled is False, forcing to True")
-        voice_manager.voice_enabled = True
-        voice_manager.use_gtts = True
-        print(f"🚨 FORCED voice_enabled: {voice_manager.voice_enabled}, use_gtts: {voice_manager.use_gtts}")
-    
-    return voice_manager
+    if VOICE_AVAILABLE or GTTS_AVAILABLE:
+        return VoiceManager()
+    else:
+        return None
 
 voice_manager = get_voice_manager()
 
-# Additional safety check - force voice to be enabled after creation
-if voice_manager and not voice_manager.voice_enabled:
-    print("🚨 FINAL SAFETY CHECK: Forcing voice_enabled to True after creation")
-    voice_manager.voice_enabled = True
-    voice_manager.use_gtts = True
-
-# Show voice engine status
-if not voice_manager:
-    st.sidebar.error("❌ Voice manager not initialized")
+# Show warning if voice is not available
+if not voice_manager or (not voice_manager.engine and not voice_manager.use_gtts):
+    st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
 else:
-    # Always show voice as enabled since we force it
-    if voice_manager.voice_enabled:
-        # Show which voice engine is being used
-        if voice_manager.use_gtts:
-            if PYGAME_AVAILABLE:
-                st.sidebar.success("🌐 Using Google Text-to-Speech with audio")
-            else:
-                st.sidebar.success("🌐 Using Google TTS with browser audio")
-        else:
-            st.sidebar.success("🔊 Using Windows Voice Engine")
+    # Show which voice engine is being used
+    if voice_manager.use_gtts:
+        st.sidebar.info("🌐 Using Google Text-to-Speech")
     else:
-        # This should never happen now due to forced enablement
-        st.sidebar.error("❌ Voice functionality disabled despite forced initialization")
-        st.sidebar.caption(f"Debug: GTTS_AVAILABLE={GTTS_AVAILABLE}, use_gtts={voice_manager.use_gtts}")
-        # Force it one more time
-        voice_manager.voice_enabled = True
-        voice_manager.use_gtts = True
-        st.sidebar.info("🚨 Voice forcefully re-enabled - refresh page if issues persist")
+        st.sidebar.info("🔊 Using Windows Voice Engine")
 
 # Page configuration
 st.set_page_config(
@@ -848,32 +401,20 @@ def generate_label_colors():
 def load_model():
     """Load the object detection model."""
     try:
-        def safe_console_message(message, msg_type="info"):
-            """Safely add console message with fallback"""
-            try:
-                add_console_message(message, msg_type)
-            except NameError:
-                # Console function not available yet, use print as fallback
-                print(f"[{msg_type.upper()}] {message}")
-        
         # Download models if needed
         if not MODEL_LOCAL_PATH.exists():
-            safe_console_message("Downloading MobileNet-SSD model...", "download")
-            safe_console_message(f"Downloading {MODEL_URL}...", "info")
+            st.info("📥 Downloading MobileNet-SSD model...")
             download_file(MODEL_URL, MODEL_LOCAL_PATH, expected_size=23147564)
-            safe_console_message("Downloaded MobileNetSSD_deploy.caffemodel", "success")
         
         # Check for prototxt file (try both naming conventions)
         prototxt_path = PROTOTXT_LOCAL_PATH
         if not prototxt_path.exists() and PROTOTXT_ALT_PATH.exists():
             prototxt_path = PROTOTXT_ALT_PATH
         elif not prototxt_path.exists():
-            safe_console_message("Downloading model configuration...", "download")
-            safe_console_message(f"Downloading {PROTOTXT_URL}...", "info")
+            st.info("📥 Downloading model configuration...")
             download_file(PROTOTXT_URL, PROTOTXT_LOCAL_PATH, expected_size=29353)
-            safe_console_message("Downloaded MobileNetSSD_deploy.prototxt.txt", "success")
         
-        safe_console_message(f"Loading model from: {prototxt_path.name}", "info")
+        st.success(f"✅ Loading model from: {prototxt_path}")
         net = cv2.dnn.readNetFromCaffe(str(prototxt_path), str(MODEL_LOCAL_PATH))
         
         # Test the model with a dummy input
@@ -881,21 +422,13 @@ def load_model():
         net.setInput(dummy_blob)
         test_output = net.forward()
         
-        safe_console_message(f"Model loaded successfully! Output shape: {test_output.shape}", "success")
+        st.success(f"✅ Model loaded successfully! Output shape: {test_output.shape}")
         return net
         
     except Exception as e:
-        def safe_console_message(message, msg_type="info"):
-            """Safely add console message with fallback"""
-            try:
-                add_console_message(message, msg_type)
-            except NameError:
-                # Console function not available yet, use print as fallback
-                print(f"[{msg_type.upper()}] {message}")
-                
-        safe_console_message(f"Error loading model: {e}", "error")
-        safe_console_message(f"Model path: {MODEL_LOCAL_PATH}", "error")
-        safe_console_message(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}", "error")
+        st.error(f"❌ Error loading model: {e}")
+        st.error(f"Model path: {MODEL_LOCAL_PATH}")
+        st.error(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}")
         return None
 
 def get_local_ip():
@@ -927,59 +460,7 @@ if net is None:
     st.stop()
 
 # Header
-st.title("🎯 AdMyVision - Real-time Object Detection")
-st.markdown("### 🚀 AI-Powered Object Detection with Voice Announcements")
-
-# Add global speech synthesis initialization
-if voice_manager and voice_manager.voice_enabled:
-    # Create a global speech enabler component
-    speech_enabler_js = """
-    <div id="global-speech-enabler" style="display: none;">
-        <script>
-        (function() {
-            console.log('🌐 Global speech synthesis enabler loaded');
-            
-            // Function to enable speech synthesis
-            function enableSpeechSynthesis() {
-                if ('speechSynthesis' in window) {
-                    // Create a silent utterance to trigger permission
-                    var silentUtterance = new SpeechSynthesisUtterance(' ');
-                    silentUtterance.volume = 0;
-                    silentUtterance.rate = 10;
-                    
-                    silentUtterance.onend = function() {
-                        console.log('✅ Speech synthesis enabled globally');
-                        window.speechEnabled = true;
-                    };
-                    
-                    speechSynthesis.speak(silentUtterance);
-                }
-            }
-            
-            // Try to enable on page interaction
-            function handleUserInteraction() {
-                console.log('👆 User interaction detected, enabling speech...');
-                enableSpeechSynthesis();
-                // Remove listeners after first interaction
-                document.removeEventListener('click', handleUserInteraction);
-                document.removeEventListener('keydown', handleUserInteraction);
-                document.removeEventListener('touchstart', handleUserInteraction);
-            }
-            
-            // Add event listeners for user interaction
-            document.addEventListener('click', handleUserInteraction, { passive: true });
-            document.addEventListener('keydown', handleUserInteraction, { passive: true });
-            document.addEventListener('touchstart', handleUserInteraction, { passive: true });
-            
-            // Try immediate enablement (may not work without user interaction)
-            setTimeout(enableSpeechSynthesis, 1000);
-            
-        })();
-        </script>
-    </div>
-    """
-    components.html(speech_enabler_js, height=1)
-
+st.title("🎯 Real-time Object Detection")
 st.markdown("---")
 
 # Initialize session state
@@ -1012,58 +493,13 @@ if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
 
     if voice_enabled:
         if voice_manager.use_gtts:
-            st.sidebar.success("🎤 Voice ON (Browser Speech)")
+            st.sidebar.success("🎤 Voice ON (Google TTS)")
         else:
             st.sidebar.success("🎤 Voice ON (Windows)")
-        
-        # Add test voice button with direct browser speech
+        # Add test voice button
         if st.sidebar.button("🎯 Test Voice"):
-            # Use direct browser speech synthesis without relying on voice_manager methods
-            test_text = "Hello! Voice test successful. Object detection audio is working."
-            
-            # Create direct JavaScript for voice testing
-            speech_test_js = f"""
-            <div style="height: 1px;">
-                <script>
-                console.log('🎯 Direct voice test initiated');
-                
-                if ('speechSynthesis' in window) {{
-                    // Cancel any ongoing speech
-                    speechSynthesis.cancel();
-                    
-                    setTimeout(function() {{
-                        var utterance = new SpeechSynthesisUtterance('{test_text}');
-                        utterance.rate = 0.8;
-                        utterance.pitch = 1.0;
-                        utterance.volume = 1.0;
-                        utterance.lang = 'en-US';
-                        
-                        utterance.onstart = function() {{
-                            console.log('✅ Voice test started successfully');
-                        }};
-                        
-                        utterance.onend = function() {{
-                            console.log('✅ Voice test completed successfully');
-                        }};
-                        
-                        utterance.onerror = function(event) {{
-                            console.error('❌ Voice test failed:', event.error);
-                        }};
-                        
-                        speechSynthesis.speak(utterance);
-                        console.log('🚀 Direct voice test speech initiated');
-                    }}, 100);
-                }} else {{
-                    console.error('❌ Speech synthesis not supported');
-                }}
-                </script>
-            </div>
-            """
-            
-            # Display the test
-            components.html(speech_test_js, height=1)
-            st.sidebar.success("🎤 Voice test initiated! Check browser console if no audio.")
-            st.sidebar.info("💡 If no sound, try clicking anywhere on the page first.")
+            if voice_manager:
+                voice_manager.announce_detection("test object", 1.5)
     else:
         st.sidebar.info("🔇 Voice OFF")
 else:
@@ -1089,9 +525,6 @@ class ObjectDetector:
         self.last_detection_frame = 0
         self.total_objects = 0
         self.current_detections = []  # Store current frame detections
-        self.last_announcements = {}  # Track last announcement time per object
-        self.announcement_cooldown = 3.0  # Seconds between same object announcements
-        self.last_announcement_time = 0  # Global cooldown
     
     def estimate_distance(self, bbox_area, object_name):
         """Estimate distance based on bounding box area"""
@@ -1204,47 +637,14 @@ class ObjectDetector:
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                         
                         # Voice announcement (if enabled)
-                        # Use global queue system for thread-safe voice announcements
-                        if (voice_manager and voice_manager.voice_enabled):
-                            current_time = time.time()
-                            object_name = self.classes[class_id]
-                            
-                            # Check cooldown
-                            should_announce = False
-                            
-                            # Global cooldown check
-                            if current_time - self.last_announcement_time >= 1.0:  # 1 second global cooldown
-                                # Object-specific cooldown check
-                                if object_name not in self.last_announcements:
-                                    should_announce = True
-                                elif current_time - self.last_announcements[object_name] >= self.announcement_cooldown:
-                                    should_announce = True
-                            
-                            if should_announce:
-                                print(f"🎤 Queuing voice announcement for {object_name} at {distance:.1f}m")
-                                
-                                # Update timing
-                                self.last_announcements[object_name] = current_time
-                                self.last_announcement_time = current_time
-                                
-                                # Create announcement text
-                                if distance < 1.0:
-                                    distance_text = f"{int(distance * 100)} centimeters"
-                                else:
-                                    distance_text = f"{distance:.1f} meters"
-                                announcement = f"Detected {object_name} at {distance_text}"
-                                
-                                # Add to global voice queue
-                                try:
-                                    voice_queue.put(announcement, block=False)
-                                    print(f"✅ Voice announcement queued: {announcement}")
-                                except queue.Full:
-                                    print("⚠️ Voice queue full, skipping announcement")
-                            else:
-                                print(f"Voice announcement skipped (cooldown): {object_name}")
+                        # Pass voice enabled state directly since session_state is not available in video thread
+                        if (voice_manager and (voice_manager.engine or voice_manager.use_gtts) and voice_manager.voice_enabled):
+                            print(f"Attempting voice announcement for {self.classes[class_id]} at {distance:.1f}m")
+                            voice_manager.announce_detection(self.classes[class_id], distance)
                         else:
                             if voice_manager:
-                                print(f"Voice announcement skipped - voice_enabled: {voice_manager.voice_enabled}")
+                                engine_available = voice_manager.engine is not None or voice_manager.use_gtts
+                                print(f"Voice announcement skipped - voice_enabled: {voice_manager.voice_enabled}, engine_available: {engine_available}")
                             else:
                                 print("Voice announcement skipped - no voice_manager")
             
@@ -1318,137 +718,73 @@ if mode == "PC Camera":
         )
     
     with col2:
-        # Simple status display
-        st.subheader("📊 Detection Status")
+        st.subheader("📊 Status")
         
-        # Camera status
-        camera_status = webrtc_ctx.state.playing if webrtc_ctx else False
-        if camera_status:
-            st.success("✅ Camera Active - Detection Running")
+        if webrtc_ctx.state.playing:
+            st.success("✅ Camera Active")
         else:
-            st.info("📹 Camera Inactive - Click Start to begin")
+            st.error("❌ Camera Inactive")
         
-        # Handle voice announcements from global queue
-        if camera_status and voice_manager and voice_manager.voice_enabled:
-            announcements_to_play = []
-            
-            # Get all pending announcements from the queue
-            try:
-                while not voice_queue.empty():
-                    announcement = voice_queue.get_nowait()
-                    announcements_to_play.append(announcement)
-            except queue.Empty:
-                pass
-            
-            # Play announcements using browser speech synthesis
-            for announcement in announcements_to_play:
-                print(f"🎤 Playing announcement: {announcement}")
-                
-                # Escape text for JavaScript
-                escaped_announcement = announcement.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
-                
-                # Create browser speech component
-                announcement_js = f"""
-                <div style="display: none;">
-                    <script>
-                    (function() {{
-                        console.log('🎤 PC Camera announcement: {escaped_announcement}');
-                        if ('speechSynthesis' in window) {{
-                            // Cancel any ongoing speech
-                            speechSynthesis.cancel();
-                            
-                            // Small delay to ensure cancellation
-                            setTimeout(function() {{
-                                var utterance = new SpeechSynthesisUtterance('{escaped_announcement}');
-                                utterance.rate = 0.8;
-                                utterance.pitch = 1.0;
-                                utterance.volume = 1.0;
-                                utterance.lang = 'en-US';
-                                
-                                // Get available voices and select best one
-                                var voices = speechSynthesis.getVoices();
-                                if (voices.length > 0) {{
-                                    var bestVoice = voices.find(v => v.lang === 'en-US' && !v.localService) ||
-                                                   voices.find(v => v.lang.startsWith('en')) ||
-                                                   voices[0];
-                                    if (bestVoice) {{
-                                        utterance.voice = bestVoice;
-                                    }}
-                                }}
-                                
-                                // Event handlers
-                                utterance.onstart = function() {{
-                                    console.log('✅ Voice announcement started: {escaped_announcement}');
-                                }};
-                                
-                                utterance.onend = function() {{
-                                    console.log('✅ Voice announcement completed: {escaped_announcement}');
-                                }};
-                                
-                                utterance.onerror = function(event) {{
-                                    console.error('❌ Voice announcement failed:', event.error);
-                                }};
-                                
-                                // Speak the announcement
-                                speechSynthesis.speak(utterance);
-                                
-                            }}, 100);
-                        }} else {{
-                            console.error('❌ Speech synthesis not supported');
-                        }}
-                    }})();
-                    </script>
-                </div>
-                """
-                
-                # Display the component
-                components.html(announcement_js, height=1)
-        
-        # Voice status indicator
-        if voice_manager and voice_manager.voice_enabled:
-            queue_size = voice_queue.qsize()
-            if queue_size > 0:
-                st.info(f"🎤 Processing {queue_size} voice announcement(s)...")
-            else:
-                st.success("🎤 Voice Ready")
+        st.metric("Frames Processed", st.session_state.frame_count)
         
         # Model status
         if net is not None:
-            st.success(f"✅ Model Ready | 🎯 Threshold: {score_threshold:.2f}")
+            st.success("✅ Model Loaded")
         else:
-            st.error("❌ Model Failed to Load")
+            st.error("❌ Model Failed")
         
-        # Simple detection display
-        if camera_status:
-            st.info("� **Scanning for objects...**\n"
-                   "Point camera at: Person, Car, Bottle, Chair, Phone, etc.")
+        # Display current threshold
+        st.info(f"🎯 Threshold: {score_threshold:.2f}")
+        
+        # Display latest detections
+        st.subheader("🔍 Latest Detections")
+        
+        # Update detections from queue
+        current_detection_count = 0
+        total_detected = 0
+        try:
+            while not result_queue.empty():
+                result_data = result_queue.get_nowait()
+                if isinstance(result_data, dict):
+                    st.session_state.detections = result_data.get('detections', [])
+                    current_detection_count = result_data.get('current_count', 0)
+                    total_detected = result_data.get('total_count', 0)
+                    st.session_state.frame_count = result_data.get('frame_count', 0)
+                else:
+                    # Fallback for old format
+                    st.session_state.detections = result_data
+                    current_detection_count = len(result_data) if result_data else 0
+        except:
+            pass
+        
+        # Show detection statistics
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Current Objects", current_detection_count)
+        with col2:
+            st.metric("🎯 Total Objects Found", total_detected)
+        
+        # Reset button for total count
+        if st.button("🔄 Reset Total Count", help="Reset the total objects detected counter"):
+            detector.reset_total_count()
+            st.rerun()
+        
+        if st.session_state.detections:
+            for det in st.session_state.detections[:5]:  # Show top 5
+                confidence_color = "🟢" if det.score > 0.7 else "🟡" if det.score > 0.5 else "🔴"
+                st.write(f"{confidence_color} **{det.label}**: {det.score:.1%}")
+        else:
+            st.info("👀 Point camera at objects like:\n- Person\n- Car\n- Bottle\n- Chair\n- Cat/Dog")
+            
+        # Debug information
+        if st.checkbox("🔧 Debug Info"):
+            st.write(f"Model loaded: {net is not None}")
+            st.write(f"Threshold: {score_threshold}")
+            st.write(f"Frame count: {st.session_state.frame_count}")
+            st.write(f"Queue size: {result_queue.qsize()}")
 
 elif mode == "Phone Camera (WebRTC)":
     st.subheader("📱 Phone Camera Detection")
-    st.info("📢 **Voice Announcements:** Mobile devices use browser speech synthesis. Ensure your browser has voice synthesis enabled and volume is up.")
-    
-    # Camera selection for mobile devices
-    camera_col1, camera_col2 = st.columns([2, 1])
-    
-    with camera_col1:
-        # Camera facing direction selector
-        camera_facing = st.selectbox(
-            "📹 Camera Direction",
-            ["user", "environment"],
-            index=1,  # Default to back camera
-            format_func=lambda x: "🤳 Front Camera (Selfie)" if x == "user" else "📷 Back Camera (Main)",
-            help="Choose which camera to use on your mobile device"
-        )
-    
-    with camera_col2:
-        # Camera quality selector
-        quality_preset = st.selectbox(
-            "🎥 Quality",
-            ["standard", "high"],
-            index=0,
-            format_func=lambda x: "📱 Standard (480p)" if x == "standard" else "📺 High (720p)",
-            help="Choose video quality (higher quality uses more bandwidth)"
-        )
     
     col1, col2 = st.columns([1, 1])
     
@@ -1464,53 +800,32 @@ elif mode == "Phone Camera (WebRTC)":
         
         st.markdown("**📋 Instructions:**")
         st.markdown("""
-        1. 📱 Scan QR code with phone camera
-        2. 🌐 Open the link in browser
-        3. ✅ Allow camera permissions
-        4. 📄 Select this same page
-        5. 📹 Choose 'Phone Camera (WebRTC)' mode
-        6. 🔄 Select camera direction above
+        1. Scan QR code with phone camera
+        2. Open the link in browser
+        3. Allow camera permissions
+        4. Select this same page
+        5. Choose 'PC Camera' mode on phone
         """)
-        
-        # Voice compatibility info for mobile
-        st.markdown("**🔊 Mobile Voice Notes:**")
-        st.info("📢 Voice announcements work on most Android devices through the browser. "
-               "iOS Safari may have limited voice support due to browser restrictions.")
     
     with col2:
-        st.info("🌐 **Live Camera Feed:**")
+        st.info("🌐 **Connection Status:**")
         
-        # Dynamic media constraints based on selections
-        if quality_preset == "high":
-            video_constraints = {
-                "width": {"ideal": 1280, "max": 1920},
-                "height": {"ideal": 720, "max": 1080},
-                "frameRate": {"ideal": 15, "max": 30},
-                "facingMode": camera_facing
-            }
-        else:
-            video_constraints = {
-                "width": {"ideal": 640, "max": 1280},
-                "height": {"ideal": 480, "max": 720},
-                "frameRate": {"ideal": 10, "max": 20},
-                "facingMode": camera_facing
-            }
-        
-        # Enhanced WebRTC for phone with camera switching
+        # Simplified WebRTC for phone
         webrtc_ctx = webrtc_streamer(
-            key=f"phone_camera_{camera_facing}_{quality_preset}",  # Unique key for camera switching
+            key="phone_camera",
             mode=WebRtcMode.SENDRECV,
             video_frame_callback=video_frame_callback,
             media_stream_constraints={
-                "video": video_constraints,
+                "video": {
+                    "width": {"ideal": 640, "max": 1280},
+                    "height": {"ideal": 480, "max": 720},
+                    "frameRate": {"ideal": 10, "max": 15}
+                },
                 "audio": False
             },
             async_processing=True,
             rtc_configuration={
-                "iceServers": [
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]}
-                ]
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
             }
         )
         
@@ -1521,84 +836,6 @@ elif mode == "Phone Camera (WebRTC)":
         else:
             st.error("❌ Not Connected")
     
-    # Handle voice announcements for phone camera
-    if webrtc_ctx.state.playing and voice_manager and voice_manager.voice_enabled:
-        announcements_to_play = []
-        
-        # Get all pending announcements from the queue
-        try:
-            while not voice_queue.empty():
-                announcement = voice_queue.get_nowait()
-                announcements_to_play.append(announcement)
-        except queue.Empty:
-            pass
-        
-        # Play announcements using browser speech synthesis (mobile optimized)
-        for announcement in announcements_to_play:
-            print(f"📱 Playing mobile announcement: {announcement}")
-            
-            # Escape text for JavaScript
-            escaped_announcement = announcement.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
-            
-            # Mobile-optimized browser speech component
-            announcement_js = f"""
-            <div style="display: none;">
-                <script>
-                (function() {{
-                    console.log('📱 Mobile announcement: {escaped_announcement}');
-                    if ('speechSynthesis' in window) {{
-                        // Cancel any ongoing speech
-                        speechSynthesis.cancel();
-                        
-                        // Longer delay for mobile devices
-                        setTimeout(function() {{
-                            var utterance = new SpeechSynthesisUtterance('{escaped_announcement}');
-                            utterance.rate = 0.8;
-                            utterance.pitch = 1.0;
-                            utterance.volume = 1.0;
-                            utterance.lang = 'en-US';
-                            
-                            // Mobile-friendly voice selection
-                            var voices = speechSynthesis.getVoices();
-                            if (voices.length > 0) {{
-                                // Prefer local voices for mobile
-                                var bestVoice = voices.find(v => v.localService && v.lang.startsWith('en')) ||
-                                               voices.find(v => v.lang.startsWith('en')) ||
-                                               voices[0];
-                                if (bestVoice) {{
-                                    utterance.voice = bestVoice;
-                                    console.log('📱 Selected mobile voice:', bestVoice.name);
-                                }}
-                            }}
-                            
-                            // Event handlers
-                            utterance.onstart = function() {{
-                                console.log('✅ Mobile voice started: {escaped_announcement}');
-                            }};
-                            
-                            utterance.onend = function() {{
-                                console.log('✅ Mobile voice completed: {escaped_announcement}');
-                            }};
-                            
-                            utterance.onerror = function(event) {{
-                                console.error('❌ Mobile voice failed:', event.error);
-                            }};
-                            
-                            // Speak the announcement
-                            speechSynthesis.speak(utterance);
-                            
-                        }}, 200);
-                    }} else {{
-                        console.error('❌ Speech synthesis not supported on mobile');
-                    }}
-                }})();
-                </script>
-            </div>
-            """
-            
-            # Display the component
-            components.html(announcement_js, height=1)
-    
     # Detection results
     if webrtc_ctx.state.playing:
         st.subheader("🔍 Detection Results")
@@ -1606,28 +843,19 @@ elif mode == "Phone Camera (WebRTC)":
         # Update detections
         current_phone_detections = 0
         total_phone_detected = 0
-        phone_detections = []
-        
         try:
             while not result_queue.empty():
                 result_data = result_queue.get_nowait()
                 if isinstance(result_data, dict):
-                    phone_detections = result_data.get('detections', [])
+                    st.session_state.detections = result_data.get('detections', [])
                     current_phone_detections = result_data.get('current_count', 0)
                     total_phone_detected = result_data.get('total_count', 0)
-                    st.session_state.detections = phone_detections
                 else:
                     # Fallback for old format
-                    phone_detections = result_data if result_data else []
-                    current_phone_detections = len(phone_detections)
-                    st.session_state.detections = phone_detections
+                    st.session_state.detections = result_data
+                    current_phone_detections = len(result_data) if result_data else 0
         except:
             pass
-        
-        # Use session state detections if no new data
-        if not phone_detections and hasattr(st.session_state, 'detections'):
-            phone_detections = st.session_state.detections
-            current_phone_detections = len(phone_detections)
         
         # Show detection statistics for phone camera
         col1, col2 = st.columns(2)
@@ -1641,88 +869,16 @@ elif mode == "Phone Camera (WebRTC)":
             detector.reset_total_count()
             st.rerun()
         
-        # Display detections with enhanced formatting
-        if phone_detections:
-            st.write("**Currently Detected Objects:**")
-            for i, det in enumerate(phone_detections[:5]):
-                confidence_color = "🟢" if det.score > 0.7 else "🟡" if det.score > 0.5 else "🔴"
-                
-                # Calculate distance
-                try:
-                    bbox_area = (det.box[2] - det.box[0]) * (det.box[3] - det.box[1])
-                    distance = detector.estimate_distance(bbox_area, det.label)
-                    distance_text = f" at ~{distance:.1f}m"
-                except:
-                    distance_text = ""
-                
-                st.write(f"{i+1}. {confidence_color} **{det.label.title()}**: {det.score:.1%}{distance_text}")
-            
-            if len(phone_detections) > 5:
-                st.info(f"...and {len(phone_detections) - 5} more objects detected")
-            
-            # Also show as dataframe for detailed view
-            if st.checkbox("📊 Show Detailed Table", key="phone_table"):
-                detection_data = [{
-                    'Object': det.label.title(),
-                    'Confidence': f"{det.score:.1%}",
-                    'Distance': f"~{detector.estimate_distance((det.box[2] - det.box[0]) * (det.box[3] - det.box[1]), det.label):.1f}m",
-                    'Position': f"({int(det.box[0])}, {int(det.box[1])})"
-                } for det in phone_detections]
-                st.dataframe(detection_data, use_container_width=True)
+        if st.session_state.detections:
+            detection_data = [{
+                'Object': det.label.title(),
+                'Confidence': f"{det.score:.1%}",
+                'Position': f"({int(det.box[0])}, {int(det.box[1])})"
+            } for det in st.session_state.detections]
+            st.dataframe(detection_data, use_container_width=True)
         else:
             st.info("🔍 Point camera at objects to detect them")
 
-# Console-like UI for system status and model loading
-st.markdown("---")
-st.markdown("#### 💻 System Console")
-console_container = st.container()
-
-with console_container:
-    console_placeholder = st.empty()
-    
-    # Initialize console messages if not in session state
-    if 'console_messages' not in st.session_state:
-        st.session_state.console_messages = []
-    
-    def add_console_message(message, msg_type="info"):
-        """Add a message to the console with timestamp"""
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        if msg_type == "info":
-            icon = "ℹ️"
-        elif msg_type == "success":
-            icon = "✅"
-        elif msg_type == "download":
-            icon = "📥"
-        elif msg_type == "error":
-            icon = "❌"
-        else:
-            icon = "▶️"
-            
-        formatted_message = f"[{timestamp}] {icon} {message}"
-        st.session_state.console_messages.append(formatted_message)
-        
-        # Keep only last 10 messages
-        if len(st.session_state.console_messages) > 10:
-            st.session_state.console_messages = st.session_state.console_messages[-10:]
-    
-    # Display console messages in a code block
-    if st.session_state.console_messages:
-        console_text = "\n".join(st.session_state.console_messages[-8:])  # Show last 8 messages
-        console_placeholder.code(console_text, language="bash")
-    else:
-        console_placeholder.code("[00:00:00] ▶️ System ready - waiting for initialization...", language="bash")
-
-# Add initial system messages
-if 'console_initialized' not in st.session_state:
-    add_console_message("AdMyVision System Starting...", "info")
-    add_console_message(f"Python Runtime: {platform.python_version()}", "info")
-    add_console_message(f"OpenCV Version: {cv2.__version__}", "info")
-    add_console_message(f"Voice Engine: {'Browser Speech Synthesis' if GTTS_AVAILABLE else 'Disabled'}", "info")
-    st.session_state.console_initialized = True
-
 # Footer
 st.markdown("---")
-aiortc_version = aiortc.__version__ if AIORTC_AVAILABLE and aiortc else "Not Available"
-st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc_version}")
+st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc.__version__}")
