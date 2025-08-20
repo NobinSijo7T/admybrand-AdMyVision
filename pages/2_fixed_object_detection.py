@@ -982,56 +982,6 @@ if voice_manager and voice_manager.voice_enabled:
 
 st.markdown("---")
 
-# Console-like UI for system status and model loading
-st.markdown("#### 💻 System Console")
-console_container = st.container()
-
-with console_container:
-    console_placeholder = st.empty()
-    
-    # Initialize console messages if not in session state
-    if 'console_messages' not in st.session_state:
-        st.session_state.console_messages = []
-    
-    def add_console_message(message, msg_type="info"):
-        """Add a message to the console with timestamp"""
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        if msg_type == "info":
-            icon = "ℹ️"
-        elif msg_type == "success":
-            icon = "✅"
-        elif msg_type == "download":
-            icon = "📥"
-        elif msg_type == "error":
-            icon = "❌"
-        else:
-            icon = "▶️"
-            
-        formatted_message = f"[{timestamp}] {icon} {message}"
-        st.session_state.console_messages.append(formatted_message)
-        
-        # Keep only last 10 messages
-        if len(st.session_state.console_messages) > 10:
-            st.session_state.console_messages = st.session_state.console_messages[-10:]
-    
-    # Display console messages in a code block
-    if st.session_state.console_messages:
-        console_text = "\n".join(st.session_state.console_messages[-8:])  # Show last 8 messages
-        console_placeholder.code(console_text, language="bash")
-    else:
-        console_placeholder.code("[00:00:00] ▶️ System ready - waiting for initialization...", language="bash")
-
-# Add initial system messages
-if 'console_initialized' not in st.session_state:
-    add_console_message("AdMyVision System Starting...", "info")
-    add_console_message(f"Python Runtime: {platform.python_version()}", "info")
-    add_console_message(f"OpenCV Version: {cv2.__version__}", "info")
-    add_console_message(f"Voice Engine: {'Browser Speech Synthesis' if GTTS_AVAILABLE else 'Disabled'}", "info")
-    st.session_state.console_initialized = True
-st.markdown("---")
-
 # Initialize session state
 if "frame_count" not in st.session_state:
     st.session_state.frame_count = 0
@@ -1721,6 +1671,56 @@ elif mode == "Phone Camera (WebRTC)":
                 st.dataframe(detection_data, use_container_width=True)
         else:
             st.info("🔍 Point camera at objects to detect them")
+
+# Console-like UI for system status and model loading
+st.markdown("---")
+st.markdown("#### 💻 System Console")
+console_container = st.container()
+
+with console_container:
+    console_placeholder = st.empty()
+    
+    # Initialize console messages if not in session state
+    if 'console_messages' not in st.session_state:
+        st.session_state.console_messages = []
+    
+    def add_console_message(message, msg_type="info"):
+        """Add a message to the console with timestamp"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        if msg_type == "info":
+            icon = "ℹ️"
+        elif msg_type == "success":
+            icon = "✅"
+        elif msg_type == "download":
+            icon = "📥"
+        elif msg_type == "error":
+            icon = "❌"
+        else:
+            icon = "▶️"
+            
+        formatted_message = f"[{timestamp}] {icon} {message}"
+        st.session_state.console_messages.append(formatted_message)
+        
+        # Keep only last 10 messages
+        if len(st.session_state.console_messages) > 10:
+            st.session_state.console_messages = st.session_state.console_messages[-10:]
+    
+    # Display console messages in a code block
+    if st.session_state.console_messages:
+        console_text = "\n".join(st.session_state.console_messages[-8:])  # Show last 8 messages
+        console_placeholder.code(console_text, language="bash")
+    else:
+        console_placeholder.code("[00:00:00] ▶️ System ready - waiting for initialization...", language="bash")
+
+# Add initial system messages
+if 'console_initialized' not in st.session_state:
+    add_console_message("AdMyVision System Starting...", "info")
+    add_console_message(f"Python Runtime: {platform.python_version()}", "info")
+    add_console_message(f"OpenCV Version: {cv2.__version__}", "info")
+    add_console_message(f"Voice Engine: {'Browser Speech Synthesis' if GTTS_AVAILABLE else 'Disabled'}", "info")
+    st.session_state.console_initialized = True
 
 # Footer
 st.markdown("---")
