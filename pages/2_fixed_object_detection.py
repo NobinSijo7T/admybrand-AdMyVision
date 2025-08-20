@@ -22,6 +22,7 @@ from streamlit_webrtc import (
     webrtc_streamer,
     __version__ as st_webrtc_version,
 )
+import streamlit.components.v1 as components
 import aiortc
 
 # Try to import pyttsx3 with proper error handling
@@ -192,8 +193,14 @@ class VoiceManager:
         announcement = f"Detected {object_name} at {distance_text}"
         print(f"Voice announcement: {announcement}")  # Debug output
         
-        # Choose TTS method based on available engine
-        if self.use_gtts:
+        # Choose TTS method - prefer browser speech for mobile compatibility
+        user_agent = st.context.headers.get("user-agent", "").lower() if hasattr(st.context, 'headers') else ""
+        is_mobile = any(device in user_agent for device in ["mobile", "android", "iphone", "ipad"])
+        
+        if is_mobile:
+            # Use browser speech synthesis for mobile devices
+            self._speak_with_browser(announcement)
+        elif self.use_gtts or not self.engine:
             self._speak_with_gtts(announcement)
         else:
             self._speak_with_pyttsx3(announcement)
@@ -285,6 +292,52 @@ class VoiceManager:
         thread = threading.Thread(target=speak, daemon=True)
         thread.start()
     
+    def _speak_with_browser(self, text):
+        """Use browser's speech synthesis for mobile compatibility"""
+        try:
+            # JavaScript speech synthesis for browser compatibility
+            speech_js = f"""
+            <script>
+            function speakText() {{
+                if ('speechSynthesis' in window) {{
+                    var utterance = new SpeechSynthesisUtterance(`{text}`);
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+                    
+                    // Try to use a female voice if available
+                    var voices = speechSynthesis.getVoices();
+                    for (var i = 0; i < voices.length; i++) {{
+                        if (voices[i].name.includes('Female') || voices[i].name.includes('Zira') || 
+                            voices[i].name.includes('Google') && voices[i].gender === 'female') {{
+                            utterance.voice = voices[i];
+                            break;
+                        }}
+                    }}
+                    
+                    speechSynthesis.speak(utterance);
+                    console.log('Browser speech synthesis: {text}');
+                }} else {{
+                    console.log('Speech synthesis not supported');
+                }}
+            }}
+            
+            // Wait for voices to load and then speak
+            if (speechSynthesis.getVoices().length === 0) {{
+                speechSynthesis.addEventListener('voiceschanged', speakText);
+            }} else {{
+                speakText();
+            }}
+            </script>
+            """
+            
+            # Display the JavaScript component
+            components.html(speech_js, height=0)
+            print(f"Browser speech synthesis: {text}")
+            
+        except Exception as e:
+            print(f"Browser speech synthesis error: {e}")
+
     def _speak_with_gtts(self, text):
         """Speak using Google Text-to-Speech with proper state management"""
         def speak():
@@ -718,63 +771,128 @@ if mode == "PC Camera":
         )
     
     with col2:
-        st.subheader("📊 Status")
+        # Real-time status container
+        status_container = st.container()
         
-        if webrtc_ctx.state.playing:
-            st.success("✅ Camera Active")
-        else:
-            st.error("❌ Camera Inactive")
+        with status_container:
+            st.subheader("📊 Live Status")
+            
+            # Camera status with auto-refresh
+            camera_status = webrtc_ctx.state.playing if webrtc_ctx else False
+            if camera_status:
+                st.success("✅ Camera Active")
+            else:
+                st.error("❌ Camera Inactive")
+            
+            # Real-time metrics in columns
+            metric_col1, metric_col2 = st.columns(2)
+            
+            with metric_col1:
+                frame_count = getattr(st.session_state, 'frame_count', 0)
+                st.metric("📹 Frames", frame_count)
+                
+            with metric_col2:
+                # Get queue size for real-time monitoring
+                queue_size = result_queue.qsize() if result_queue else 0
+                st.metric("📊 Queue", queue_size)
+            
+            # Model and threshold status
+            if net is not None:
+                st.success(f"✅ Model Ready | 🎯 Threshold: {score_threshold:.2f}")
+            else:
+                st.error("❌ Model Failed to Load")
         
-        st.metric("Frames Processed", st.session_state.frame_count)
+        # Separate detection results container with auto-update
+        detections_container = st.container()
         
-        # Model status
-        if net is not None:
-            st.success("✅ Model Loaded")
-        else:
-            st.error("❌ Model Failed")
+        with detections_container:
+            st.subheader("🔍 Live Detections")
         
-        # Display current threshold
-        st.info(f"🎯 Threshold: {score_threshold:.2f}")
-        
-        # Display latest detections
-        st.subheader("🔍 Latest Detections")
-        
-        # Update detections from queue
-        current_detection_count = 0
-        total_detected = 0
-        try:
-            while not result_queue.empty():
-                result_data = result_queue.get_nowait()
-                if isinstance(result_data, dict):
-                    st.session_state.detections = result_data.get('detections', [])
-                    current_detection_count = result_data.get('current_count', 0)
-                    total_detected = result_data.get('total_count', 0)
-                    st.session_state.frame_count = result_data.get('frame_count', 0)
+            # Real-time detection processing
+            current_detections = []
+            detection_count = 0
+            total_count = 0
+            
+            # Process detection queue with error handling
+            try:
+                # Get the latest detection data
+                latest_data = None
+                while not result_queue.empty():
+                    latest_data = result_queue.get_nowait()
+                
+                if latest_data:
+                    if isinstance(latest_data, dict):
+                        current_detections = latest_data.get('detections', [])
+                        detection_count = latest_data.get('current_count', len(current_detections))
+                        total_count = latest_data.get('total_count', 0)
+                        # Update session state
+                        st.session_state.detections = current_detections
+                        st.session_state.frame_count = latest_data.get('frame_count', st.session_state.frame_count)
+                    else:
+                        current_detections = latest_data if latest_data else []
+                        detection_count = len(current_detections)
+                        st.session_state.detections = current_detections
                 else:
-                    # Fallback for old format
-                    st.session_state.detections = result_data
-                    current_detection_count = len(result_data) if result_data else 0
-        except:
-            pass
-        
-        # Show detection statistics
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Current Objects", current_detection_count)
-        with col2:
-            st.metric("🎯 Total Objects Found", total_detected)
-        
-        # Reset button for total count
-        if st.button("🔄 Reset Total Count", help="Reset the total objects detected counter"):
-            detector.reset_total_count()
-            st.rerun()
-        
-        if st.session_state.detections:
-            for det in st.session_state.detections[:5]:  # Show top 5
-                confidence_color = "🟢" if det.score > 0.7 else "🟡" if det.score > 0.5 else "🔴"
-                st.write(f"{confidence_color} **{det.label}**: {det.score:.1%}")
-        else:
-            st.info("👀 Point camera at objects like:\n- Person\n- Car\n- Bottle\n- Chair\n- Cat/Dog")
+                    # Use cached detections if no new data
+                    current_detections = getattr(st.session_state, 'detections', [])
+                    detection_count = len(current_detections)
+                    
+            except Exception as e:
+                st.error(f"Detection processing error: {e}")
+                current_detections = []
+                detection_count = 0
+            
+            # Live statistics
+            stats_col1, stats_col2 = st.columns(2)
+            with stats_col1:
+                st.metric("🎯 Current Objects", detection_count)
+            with stats_col2:
+                st.metric("📈 Total Found", total_count)
+            
+            # Reset button
+            if st.button("🔄 Reset Counter", help="Reset total detection counter"):
+                if 'detector' in locals():
+                    detector.reset_total_count()
+                st.rerun()
+            
+            # Live detection list
+            if current_detections and camera_status:
+                st.write("**🔴 Live Detections:**")
+                
+                for i, detection in enumerate(current_detections[:5]):
+                    try:
+                        # Confidence color coding
+                        if detection.score > 0.7:
+                            conf_color = "�"
+                        elif detection.score > 0.5:
+                            conf_color = "�"
+                        else:
+                            conf_color = "🔴"
+                        
+                        # Calculate distance
+                        bbox_area = (detection.box[2] - detection.box[0]) * (detection.box[3] - detection.box[1])
+                        distance = detector.estimate_distance(bbox_area, detection.label)
+                        
+                        # Display detection info
+                        st.write(f"{i+1}. {conf_color} **{detection.label.title()}** "
+                                f"({detection.score:.0%}) at ~{distance:.1f}m")
+                        
+                    except Exception as e:
+                        st.write(f"{i+1}. ⚠️ Detection error: {e}")
+                
+                if len(current_detections) > 5:
+                    st.info(f"➕ {len(current_detections) - 5} more objects detected")
+                    
+            elif camera_status:
+                st.info("�️ **Scanning for objects...**\n"
+                       "Point camera at: Person, Car, Bottle, Chair, Phone, etc.")
+            else:
+                st.warning("📹 **Camera not active**\n"
+                          "Click the camera button to start detection")
+            
+            # Auto-refresh for real-time updates
+            if camera_status:
+                time.sleep(0.2)  # Refresh every 200ms when camera is active
             
         # Debug information
         if st.checkbox("🔧 Debug Info"):
@@ -782,9 +900,38 @@ if mode == "PC Camera":
             st.write(f"Threshold: {score_threshold}")
             st.write(f"Frame count: {st.session_state.frame_count}")
             st.write(f"Queue size: {result_queue.qsize()}")
+            st.write(f"Session detections: {len(st.session_state.get('detections', []))}")
+            st.write(f"Latest detections: {len(latest_detections)}")
+        
+        # Auto-refresh to keep status updated
+        time.sleep(0.1)  # Small delay to prevent excessive CPU usage
 
 elif mode == "Phone Camera (WebRTC)":
     st.subheader("📱 Phone Camera Detection")
+    st.info("📢 **Voice Announcements:** Mobile devices use browser speech synthesis. Ensure your browser has voice synthesis enabled and volume is up.")
+    
+    # Camera selection for mobile devices
+    camera_col1, camera_col2 = st.columns([2, 1])
+    
+    with camera_col1:
+        # Camera facing direction selector
+        camera_facing = st.selectbox(
+            "📹 Camera Direction",
+            ["user", "environment"],
+            index=1,  # Default to back camera
+            format_func=lambda x: "🤳 Front Camera (Selfie)" if x == "user" else "📷 Back Camera (Main)",
+            help="Choose which camera to use on your mobile device"
+        )
+    
+    with camera_col2:
+        # Camera quality selector
+        quality_preset = st.selectbox(
+            "🎥 Quality",
+            ["standard", "high"],
+            index=0,
+            format_func=lambda x: "📱 Standard (480p)" if x == "standard" else "📺 High (720p)",
+            help="Choose video quality (higher quality uses more bandwidth)"
+        )
     
     col1, col2 = st.columns([1, 1])
     
@@ -800,32 +947,53 @@ elif mode == "Phone Camera (WebRTC)":
         
         st.markdown("**📋 Instructions:**")
         st.markdown("""
-        1. Scan QR code with phone camera
-        2. Open the link in browser
-        3. Allow camera permissions
-        4. Select this same page
-        5. Choose 'PC Camera' mode on phone
+        1. 📱 Scan QR code with phone camera
+        2. 🌐 Open the link in browser
+        3. ✅ Allow camera permissions
+        4. 📄 Select this same page
+        5. 📹 Choose 'Phone Camera (WebRTC)' mode
+        6. 🔄 Select camera direction above
         """)
+        
+        # Voice compatibility info for mobile
+        st.markdown("**🔊 Mobile Voice Notes:**")
+        st.info("📢 Voice announcements work on most Android devices through the browser. "
+               "iOS Safari may have limited voice support due to browser restrictions.")
     
     with col2:
-        st.info("🌐 **Connection Status:**")
+        st.info("🌐 **Live Camera Feed:**")
         
-        # Simplified WebRTC for phone
+        # Dynamic media constraints based on selections
+        if quality_preset == "high":
+            video_constraints = {
+                "width": {"ideal": 1280, "max": 1920},
+                "height": {"ideal": 720, "max": 1080},
+                "frameRate": {"ideal": 15, "max": 30},
+                "facingMode": camera_facing
+            }
+        else:
+            video_constraints = {
+                "width": {"ideal": 640, "max": 1280},
+                "height": {"ideal": 480, "max": 720},
+                "frameRate": {"ideal": 10, "max": 20},
+                "facingMode": camera_facing
+            }
+        
+        # Enhanced WebRTC for phone with camera switching
         webrtc_ctx = webrtc_streamer(
-            key="phone_camera",
+            key=f"phone_camera_{camera_facing}_{quality_preset}",  # Unique key for camera switching
             mode=WebRtcMode.SENDRECV,
             video_frame_callback=video_frame_callback,
             media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 640, "max": 1280},
-                    "height": {"ideal": 480, "max": 720},
-                    "frameRate": {"ideal": 10, "max": 15}
-                },
+                "video": video_constraints,
                 "audio": False
             },
             async_processing=True,
             rtc_configuration={
-                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]}
+                ]
             }
         )
         
@@ -843,19 +1011,28 @@ elif mode == "Phone Camera (WebRTC)":
         # Update detections
         current_phone_detections = 0
         total_phone_detected = 0
+        phone_detections = []
+        
         try:
             while not result_queue.empty():
                 result_data = result_queue.get_nowait()
                 if isinstance(result_data, dict):
-                    st.session_state.detections = result_data.get('detections', [])
+                    phone_detections = result_data.get('detections', [])
                     current_phone_detections = result_data.get('current_count', 0)
                     total_phone_detected = result_data.get('total_count', 0)
+                    st.session_state.detections = phone_detections
                 else:
                     # Fallback for old format
-                    st.session_state.detections = result_data
-                    current_phone_detections = len(result_data) if result_data else 0
+                    phone_detections = result_data if result_data else []
+                    current_phone_detections = len(phone_detections)
+                    st.session_state.detections = phone_detections
         except:
             pass
+        
+        # Use session state detections if no new data
+        if not phone_detections and hasattr(st.session_state, 'detections'):
+            phone_detections = st.session_state.detections
+            current_phone_detections = len(phone_detections)
         
         # Show detection statistics for phone camera
         col1, col2 = st.columns(2)
@@ -869,13 +1046,34 @@ elif mode == "Phone Camera (WebRTC)":
             detector.reset_total_count()
             st.rerun()
         
-        if st.session_state.detections:
-            detection_data = [{
-                'Object': det.label.title(),
-                'Confidence': f"{det.score:.1%}",
-                'Position': f"({int(det.box[0])}, {int(det.box[1])})"
-            } for det in st.session_state.detections]
-            st.dataframe(detection_data, use_container_width=True)
+        # Display detections with enhanced formatting
+        if phone_detections:
+            st.write("**Currently Detected Objects:**")
+            for i, det in enumerate(phone_detections[:5]):
+                confidence_color = "🟢" if det.score > 0.7 else "🟡" if det.score > 0.5 else "🔴"
+                
+                # Calculate distance
+                try:
+                    bbox_area = (det.box[2] - det.box[0]) * (det.box[3] - det.box[1])
+                    distance = detector.estimate_distance(bbox_area, det.label)
+                    distance_text = f" at ~{distance:.1f}m"
+                except:
+                    distance_text = ""
+                
+                st.write(f"{i+1}. {confidence_color} **{det.label.title()}**: {det.score:.1%}{distance_text}")
+            
+            if len(phone_detections) > 5:
+                st.info(f"...and {len(phone_detections) - 5} more objects detected")
+            
+            # Also show as dataframe for detailed view
+            if st.checkbox("📊 Show Detailed Table", key="phone_table"):
+                detection_data = [{
+                    'Object': det.label.title(),
+                    'Confidence': f"{det.score:.1%}",
+                    'Distance': f"~{detector.estimate_distance((det.box[2] - det.box[0]) * (det.box[3] - det.box[1]), det.label):.1f}m",
+                    'Position': f"({int(det.box[0])}, {int(det.box[1])})"
+                } for det in phone_detections]
+                st.dataframe(detection_data, use_container_width=True)
         else:
             st.info("🔍 Point camera at objects to detect them")
 
