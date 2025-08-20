@@ -1135,6 +1135,9 @@ class ObjectDetector:
         self.last_detection_frame = 0
         self.total_objects = 0
         self.current_detections = []  # Store current frame detections
+        self.last_announcements = {}  # Track last announcement time per object
+        self.announcement_cooldown = 3.0  # Seconds between same object announcements
+        self.last_announcement_time = 0  # Global cooldown
     
     def estimate_distance(self, bbox_area, object_name):
         """Estimate distance based on bounding box area"""
@@ -1247,14 +1250,98 @@ class ObjectDetector:
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                         
                         # Voice announcement (if enabled)
-                        # Pass voice enabled state directly since session_state is not available in video thread
-                        if (voice_manager and (voice_manager.engine or voice_manager.use_gtts) and voice_manager.voice_enabled):
-                            print(f"Attempting voice announcement for {self.classes[class_id]} at {distance:.1f}m")
-                            voice_manager.announce_detection(self.classes[class_id], distance)
+                        # Use direct voice synthesis since we can't use Streamlit components in video thread
+                        if (voice_manager and voice_manager.voice_enabled):
+                            current_time = time.time()
+                            object_name = self.classes[class_id]
+                            
+                            # Check cooldown
+                            should_announce = False
+                            
+                            # Global cooldown check
+                            if current_time - self.last_announcement_time >= 1.0:  # 1 second global cooldown
+                                # Object-specific cooldown check
+                                if object_name not in self.last_announcements:
+                                    should_announce = True
+                                elif current_time - self.last_announcements[object_name] >= self.announcement_cooldown:
+                                    should_announce = True
+                            
+                            if should_announce:
+                                print(f"Attempting voice announcement for {object_name} at {distance:.1f}m")
+                                
+                                # Update timing
+                                self.last_announcements[object_name] = current_time
+                                self.last_announcement_time = current_time
+                                
+                                # Create announcement text
+                                if distance < 1.0:
+                                    distance_text = f"{int(distance * 100)} centimeters"
+                                else:
+                                    distance_text = f"{distance:.1f} meters"
+                                announcement = f"Detected {object_name} at {distance_text}"
+                                
+                                # Try different voice methods based on availability
+                                try:
+                                    # Method 1: Try pyttsx3 if available (Windows/Desktop)
+                                    if VOICE_AVAILABLE and pyttsx3:
+                                        import threading
+                                        def speak_pyttsx3():
+                                            try:
+                                                engine = pyttsx3.init()
+                                                engine.setProperty('rate', 160)
+                                                engine.setProperty('volume', 1.0)
+                                                engine.say(announcement)
+                                                engine.runAndWait()
+                                                print(f"✅ pyttsx3 announcement: {announcement}")
+                                            except Exception as e:
+                                                print(f"❌ pyttsx3 failed: {e}")
+                                        
+                                        thread = threading.Thread(target=speak_pyttsx3, daemon=True)
+                                        thread.start()
+                                        
+                                    # Method 2: Try Google TTS with pygame (if available)
+                                    elif GTTS_AVAILABLE and PYGAME_AVAILABLE and gTTS and pygame:
+                                        import threading
+                                        import tempfile
+                                        import os
+                                        def speak_gtts():
+                                            try:
+                                                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                                                    temp_filename = temp_file.name
+                                                
+                                                tts = gTTS(text=announcement, lang='en', slow=False)
+                                                tts.save(temp_filename)
+                                                
+                                                pygame.mixer.music.load(temp_filename)
+                                                pygame.mixer.music.play()
+                                                
+                                                while pygame.mixer.music.get_busy():
+                                                    time.sleep(0.1)
+                                                
+                                                os.unlink(temp_filename)
+                                                print(f"✅ Google TTS announcement: {announcement}")
+                                            except Exception as e:
+                                                print(f"❌ Google TTS failed: {e}")
+                                        
+                                        thread = threading.Thread(target=speak_gtts, daemon=True)
+                                        thread.start()
+                                    
+                                    # Method 3: Store announcement for browser speech (fallback)
+                                    else:
+                                        # Store announcement in session state for main thread to handle
+                                        if hasattr(st, 'session_state'):
+                                            if 'pending_voice_announcements' not in st.session_state:
+                                                st.session_state.pending_voice_announcements = []
+                                            st.session_state.pending_voice_announcements.append(announcement)
+                                            print(f"📝 Stored announcement for browser speech: {announcement}")
+                                        
+                                except Exception as e:
+                                    print(f"❌ Voice announcement failed: {e}")
+                            else:
+                                print(f"Voice announcement skipped (cooldown): {object_name}")
                         else:
                             if voice_manager:
-                                engine_available = voice_manager.engine is not None or voice_manager.use_gtts
-                                print(f"Voice announcement skipped - voice_enabled: {voice_manager.voice_enabled}, engine_available: {engine_available}")
+                                print(f"Voice announcement skipped - voice_enabled: {voice_manager.voice_enabled}")
                             else:
                                 print("Voice announcement skipped - no voice_manager")
             
@@ -1337,6 +1424,35 @@ if mode == "PC Camera":
             st.success("✅ Camera Active - Detection Running")
         else:
             st.info("📹 Camera Inactive - Click Start to begin")
+        
+        # Handle pending voice announcements from video thread
+        if camera_status and 'pending_voice_announcements' in st.session_state and st.session_state.pending_voice_announcements:
+            for announcement in st.session_state.pending_voice_announcements:
+                # Use browser speech synthesis for announcements stored by video thread
+                announcement_js = f"""
+                <div style="display: none;">
+                    <script>
+                    (function() {{
+                        console.log('🎤 Playing pending announcement: {announcement}');
+                        if ('speechSynthesis' in window) {{
+                            speechSynthesis.cancel();
+                            setTimeout(function() {{
+                                var utterance = new SpeechSynthesisUtterance('{announcement}');
+                                utterance.rate = 0.8;
+                                utterance.pitch = 1.0;
+                                utterance.volume = 1.0;
+                                utterance.lang = 'en-US';
+                                speechSynthesis.speak(utterance);
+                            }}, 100);
+                        }}
+                    }})();
+                    </script>
+                </div>
+                """
+                components.html(announcement_js, height=1)
+            
+            # Clear processed announcements
+            st.session_state.pending_voice_announcements = []
         
         # Model status
         if net is not None:
@@ -1446,6 +1562,35 @@ elif mode == "Phone Camera (WebRTC)":
             st.warning("🔄 Connecting...")
         else:
             st.error("❌ Not Connected")
+    
+    # Handle pending voice announcements for phone camera
+    if webrtc_ctx.state.playing and 'pending_voice_announcements' in st.session_state and st.session_state.pending_voice_announcements:
+        for announcement in st.session_state.pending_voice_announcements:
+            # Use browser speech synthesis for mobile compatibility
+            announcement_js = f"""
+            <div style="display: none;">
+                <script>
+                (function() {{
+                    console.log('📱 Mobile announcement: {announcement}');
+                    if ('speechSynthesis' in window) {{
+                        speechSynthesis.cancel();
+                        setTimeout(function() {{
+                            var utterance = new SpeechSynthesisUtterance('{announcement}');
+                            utterance.rate = 0.8;
+                            utterance.pitch = 1.0;
+                            utterance.volume = 1.0;
+                            utterance.lang = 'en-US';
+                            speechSynthesis.speak(utterance);
+                        }}, 150);
+                    }}
+                }})();
+                </script>
+            </div>
+            """
+            components.html(announcement_js, height=1)
+        
+        # Clear processed announcements
+        st.session_state.pending_voice_announcements = []
     
     # Detection results
     if webrtc_ctx.state.playing:
