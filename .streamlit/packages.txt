@@ -1,12 +1,5 @@
 ffmpeg
-libglib2.0-0
 espeak
 espeak-data
 libespeak1
-libespeak-dev
-pulseaudio
 alsa-utils
-aplay
-sox
-libsox-fmt-all
-mplayer
