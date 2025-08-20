@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  webrtc-detection:
+    build: .
+    ports:
+      - "8000:8000"  # WebRTC signaling server
+      - "8001:8001"  # HTTP server for frontend
+    volumes:
+      - ./models:/app/models
+      - ./metrics:/app/metrics
+    environment:
+      - MODE=${MODE:-server}
+      - LOG_LEVEL=INFO
+    networks:
+      - webrtc-net
+
+networks:
+  webrtc-net:
+    driver: bridge
