@@ -5,6 +5,7 @@ Fixed version addressing video freezing and mobile connection issues.
 import logging
 import queue
 import time
+import threading
 from pathlib import Path
 from typing import List, NamedTuple
 import socket
@@ -23,12 +24,341 @@ from streamlit_webrtc import (
 )
 import aiortc
 
+# Try to import pyttsx3 with proper error handling
+try:
+    import pyttsx3
+    import pythoncom  # For Windows COM initialization
+    VOICE_AVAILABLE = True
+except ImportError:
+    VOICE_AVAILABLE = False
+
+# Try to import Google Text-to-Speech as fallback
+try:
+    from gtts import gTTS
+    import pygame
+    import tempfile
+    import os
+    GTTS_AVAILABLE = True
+except ImportError:
+    GTTS_AVAILABLE = False
+
 from sample_utils.download import download_file
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
 
 logger = logging.getLogger(__name__)
+
+# Voice Manager Class
+class VoiceManager:
+    def __init__(self):
+        self.engine = None
+        self.voice_enabled = False
+        self.last_announcement = {}
+        self.announcement_cooldown = 3  # seconds between same object announcements
+        self.use_gtts = False
+        self.voice_lock = threading.Lock()  # Lock to prevent overlapping TTS calls
+        self.last_announcement_time = 0  # Global cooldown timer
+        self.global_cooldown = 0.8  # 0.8 seconds between any announcements (reduced from 1.5)
+        self.is_speaking = False
+        self.speaking_start_time = 0  # Track when speaking started
+        self.init_voice_engine()
+    
+    def init_voice_engine(self):
+        """Initialize the text-to-speech engine with fallback options"""
+        # Try pyttsx3 first
+        if VOICE_AVAILABLE:
+            try:
+                # Initialize COM for Windows
+                if hasattr(pythoncom, 'CoInitialize'):
+                    pythoncom.CoInitialize()
+                
+                # Try different driver options for better Windows compatibility
+                drivers = ['sapi5', 'nsss', 'espeak']
+                for driver in drivers:
+                    try:
+                        self.engine = pyttsx3.init(driver)
+                        if self.engine:
+                            print(f"Voice engine initialized successfully with {driver} driver")
+                            break
+                    except:
+                        continue
+                
+                if not self.engine:
+                    # Fallback to default initialization
+                    self.engine = pyttsx3.init()
+                
+                if self.engine:
+                    # Set voice properties for better audio output
+                    voices = self.engine.getProperty('voices')
+                    if voices and len(voices) > 0:
+                        # Try to find a female voice first, fallback to first voice
+                        selected_voice = voices[0]
+                        for voice in voices:
+                            if 'female' in voice.name.lower() or 'zira' in voice.name.lower():
+                                selected_voice = voice
+                                break
+                        self.engine.setProperty('voice', selected_voice.id)
+                        print(f"Selected voice: {selected_voice.name}")
+                    
+                    # Configure speech properties for clear output
+                    self.engine.setProperty('rate', 160)  # Slightly faster speech
+                    self.engine.setProperty('volume', 1.0)  # Maximum volume
+                    
+                    print("pyttsx3 voice engine initialized successfully")
+                    return
+                    
+            except Exception as e:
+                print(f"pyttsx3 initialization failed: {e}")
+                self.engine = None
+        
+        # Fallback to Google TTS if pyttsx3 fails
+        if GTTS_AVAILABLE:
+            try:
+                # Initialize pygame mixer for audio playback
+                pygame.mixer.init()
+                self.use_gtts = True
+                print("Google Text-to-Speech fallback initialized successfully")
+                return
+            except Exception as e:
+                print(f"Google TTS initialization failed: {e}")
+        
+        print("No voice engine available - both pyttsx3 and Google TTS failed")
+    
+    def test_voice_silent(self):
+        """Test the voice engine silently without audio output"""
+        if self.engine and not self.use_gtts:
+            try:
+                # Just test if engine can be called without actually speaking
+                return True
+            except Exception as e:
+                print(f"Voice test failed: {e}")
+                return False
+        elif self.use_gtts:
+            return True
+        return False
+    
+    def set_voice_enabled(self, enabled):
+        """Enable or disable voice announcements"""
+        self.voice_enabled = enabled and self.engine is not None
+    
+    def announce_detection(self, object_name, distance, confidence=None):
+        """Announce detected object with distance using available TTS engine"""
+        if not self.voice_enabled or (not self.engine and not self.use_gtts):
+            return
+        
+        current_time = time.time()
+        
+        # Check if engine is stuck and reset if needed
+        self.is_engine_stuck()
+        
+        # Check if we're currently speaking
+        if self.is_speaking:
+            print(f"Voice announcement skipped (currently speaking): {object_name}")
+            return
+        
+        # Use only object name for cooldown to reduce announcement frequency
+        object_key = object_name
+        
+        # Check object-specific cooldown to avoid repetitive announcements
+        if object_key in self.last_announcement:
+            time_since_last = current_time - self.last_announcement[object_key]
+            if time_since_last < self.announcement_cooldown:
+                print(f"Voice announcement skipped (object cooldown): {object_name}")
+                return
+        
+        # Check global cooldown - but be more lenient for different objects
+        if current_time - self.last_announcement_time < self.global_cooldown:
+            # Allow announcement if it's a different object and enough time has passed
+            last_announced_object = getattr(self, 'last_announced_object', None)
+            if last_announced_object == object_name:
+                print(f"Voice announcement skipped (global cooldown): {object_name}")
+                return
+            elif current_time - self.last_announcement_time < 0.5:  # Minimum gap for different objects
+                print(f"Voice announcement skipped (minimum gap): {object_name}")
+                return
+        
+        # Update timers
+        self.last_announcement[object_key] = current_time
+        self.last_announcement_time = current_time
+        self.last_announced_object = object_name
+        
+        # Create announcement text
+        if distance < 1.0:
+            distance_text = f"{int(distance * 100)} centimeters"
+        else:
+            distance_text = f"{distance:.1f} meters"
+        
+        announcement = f"Detected {object_name} at {distance_text}"
+        print(f"Voice announcement: {announcement}")  # Debug output
+        
+        # Choose TTS method based on available engine
+        if self.use_gtts:
+            self._speak_with_gtts(announcement)
+        else:
+            self._speak_with_pyttsx3(announcement)
+    
+    def _speak_with_pyttsx3(self, text):
+        """Speak using pyttsx3 engine with simple, reliable approach"""
+        def speak():
+            try:
+                # Set speaking flag
+                self.is_speaking = True
+                self.speaking_start_time = time.time()  # Record when speaking started
+                print(f"Starting pyttsx3 announcement: {text}")
+                
+                # Initialize COM for this thread on Windows
+                if hasattr(pythoncom, 'CoInitialize'):
+                    pythoncom.CoInitialize()
+                
+                # Try to use the main engine first
+                success = False
+                try:
+                    if self.engine:
+                        self.engine.say(text)
+                        self.engine.runAndWait()
+                        success = True
+                        print(f"Successfully announced with main pyttsx3: {text}")
+                except Exception as e:
+                    print(f"Main engine failed: {e}")
+                
+                # If main engine failed, try creating a new one
+                if not success:
+                    try:
+                        temp_engine = pyttsx3.init()
+                        if temp_engine:
+                            # Quick configuration
+                            temp_engine.setProperty('rate', 150)
+                            temp_engine.setProperty('volume', 0.9)
+                            
+                            temp_engine.say(text)
+                            temp_engine.runAndWait()
+                            print(f"Successfully announced with temp pyttsx3: {text}")
+                            success = True
+                    except Exception as e:
+                        print(f"Temp engine also failed: {e}")
+                
+                # If pyttsx3 completely failed, try Google TTS
+                if not success and self.gtts_available and GTTS_AVAILABLE:
+                    print("Both pyttsx3 engines failed, switching to Google TTS...")
+                    self.use_gtts = True
+                    # Call Google TTS directly in this thread to avoid flag issues
+                    try:
+                        from gtts import gTTS
+                        import pygame
+                        import tempfile
+                        import os
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                            temp_filename = temp_file.name
+                        
+                        tts = gTTS(text=text, lang='en', slow=False)
+                        tts.save(temp_filename)
+                        
+                        pygame.mixer.music.load(temp_filename)
+                        pygame.mixer.music.play()
+                        
+                        while pygame.mixer.music.get_busy():
+                            time.sleep(0.1)
+                        
+                        os.unlink(temp_filename)
+                        print(f"Successfully announced with Google TTS: {text}")
+                        success = True
+                    except Exception as e:
+                        print(f"Google TTS also failed: {e}")
+                
+                if not success:
+                    print(f"All TTS methods failed for: {text}")
+                
+                # Cleanup COM for this thread
+                if hasattr(pythoncom, 'CoUninitialize'):
+                    pythoncom.CoUninitialize()
+                    
+            except Exception as e:
+                print(f"Voice announcement completely failed: {e}")
+            finally:
+                # Always clear the speaking flag - this is critical!
+                self.is_speaking = False
+                print(f"Finished announcement (is_speaking now False): {text}")
+        
+        # Run in thread to prevent blocking
+        thread = threading.Thread(target=speak, daemon=True)
+        thread.start()
+    
+    def _speak_with_gtts(self, text):
+        """Speak using Google Text-to-Speech with proper state management"""
+        def speak():
+            try:
+                # Set speaking flag
+                self.is_speaking = True
+                
+                # Create temporary file for audio
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                    temp_filename = temp_file.name
+                
+                # Generate speech with Google TTS
+                tts = gTTS(text=text, lang='en', slow=False)
+                tts.save(temp_filename)
+                
+                # Play the audio file
+                pygame.mixer.music.load(temp_filename)
+                pygame.mixer.music.play()
+                
+                # Wait for playback to complete
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+                
+                # Clean up temporary file
+                os.unlink(temp_filename)
+                print(f"Successfully announced with Google TTS: {text}")
+                
+            except Exception as e:
+                print(f"Google TTS announcement failed: {e}")
+            finally:
+                # Always clear the speaking flag
+                self.is_speaking = False
+        
+        # Run in thread to prevent blocking
+        thread = threading.Thread(target=speak, daemon=True)
+        thread.start()
+    
+    def reset_speaking_state(self):
+        """Force reset the speaking state - useful for debugging"""
+        self.is_speaking = False
+        print("Voice speaking state forcefully reset")
+    
+    def is_engine_stuck(self):
+        """Check if engine might be stuck (speaking for too long)"""
+        current_time = time.time()
+        # If we've been "speaking" for more than 5 seconds, something is wrong
+        if self.is_speaking:
+            speaking_duration = current_time - self.speaking_start_time
+            if speaking_duration > 5:
+                print(f"Voice engine stuck for {speaking_duration:.1f} seconds, resetting...")
+                self.reset_speaking_state()
+                return True
+        return False
+
+# Initialize voice manager (cached to prevent multiple initializations)
+@st.cache_resource
+def get_voice_manager():
+    """Get a cached voice manager instance"""
+    if VOICE_AVAILABLE or GTTS_AVAILABLE:
+        return VoiceManager()
+    else:
+        return None
+
+voice_manager = get_voice_manager()
+
+# Show warning if voice is not available
+if not voice_manager or (not voice_manager.engine and not voice_manager.use_gtts):
+    st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
+else:
+    # Show which voice engine is being used
+    if voice_manager.use_gtts:
+        st.sidebar.info("🌐 Using Google Text-to-Speech")
+    else:
+        st.sidebar.info("🔊 Using Windows Voice Engine")
 
 # Page configuration
 st.set_page_config(
@@ -144,10 +474,37 @@ if "detections" not in st.session_state:
     st.session_state.detections = []
 if "last_detection_frame" not in st.session_state:
     st.session_state.last_detection_frame = 0
+if "voice_enabled" not in st.session_state:
+    st.session_state.voice_enabled = False
 
 # Sidebar
 st.sidebar.title("🔧 Settings")
 score_threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.3, 0.05)  # Lower default threshold
+
+# Voice toggle button (only show if voice is available)
+if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
+    voice_enabled = st.sidebar.toggle("🔊 Voice Announcements", value=st.session_state.voice_enabled)
+    if voice_enabled != st.session_state.voice_enabled:
+        st.session_state.voice_enabled = voice_enabled
+        voice_manager.set_voice_enabled(voice_enabled)
+    
+    # Ensure voice manager is synchronized with session state
+    voice_manager.set_voice_enabled(st.session_state.voice_enabled)
+
+    if voice_enabled:
+        if voice_manager.use_gtts:
+            st.sidebar.success("🎤 Voice ON (Google TTS)")
+        else:
+            st.sidebar.success("🎤 Voice ON (Windows)")
+        # Add test voice button
+        if st.sidebar.button("🎯 Test Voice"):
+            if voice_manager:
+                voice_manager.announce_detection("test object", 1.5)
+    else:
+        st.sidebar.info("🔇 Voice OFF")
+else:
+    st.sidebar.warning("🔇 Voice Unavailable")
+    st.session_state.voice_enabled = False
 
 mode = st.sidebar.selectbox(
     "📹 Camera Source",
@@ -167,8 +524,9 @@ class ObjectDetector:
         self.frame_count = 0
         self.last_detection_frame = 0
         self.total_objects = 0
+        self.current_detections = []  # Store current frame detections
     
-    def estimate_distance(self, bbox_area, known_object_sizes):
+    def estimate_distance(self, bbox_area, object_name):
         """Estimate distance based on bounding box area"""
         # Known approximate real-world widths in cm for common objects
         object_sizes = {
@@ -277,12 +635,27 @@ class ObjectDetector:
                         # Distance text
                         cv2.putText(image, distance_text, (x1, y1 - 5),
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                        
+                        # Voice announcement (if enabled)
+                        # Pass voice enabled state directly since session_state is not available in video thread
+                        if (voice_manager and (voice_manager.engine or voice_manager.use_gtts) and voice_manager.voice_enabled):
+                            print(f"Attempting voice announcement for {self.classes[class_id]} at {distance:.1f}m")
+                            voice_manager.announce_detection(self.classes[class_id], distance)
+                        else:
+                            if voice_manager:
+                                engine_available = voice_manager.engine is not None or voice_manager.use_gtts
+                                print(f"Voice announcement skipped - voice_enabled: {voice_manager.voice_enabled}, engine_available: {engine_available}")
+                            else:
+                                print("Voice announcement skipped - no voice_manager")
             
             # Update total count (only count new detection instances)
             if len(detection_list) > 0:
                 if self.frame_count - self.last_detection_frame > 30:  # New detection session
                     self.total_objects += len(detection_list)
                     self.last_detection_frame = self.frame_count
+            
+            # Store current detections
+            self.current_detections = detection_list
             
             # Update session state (non-blocking)
             try:
@@ -331,10 +704,17 @@ if mode == "PC Camera":
             mode=WebRtcMode.SENDRECV,
             video_frame_callback=video_frame_callback,
             media_stream_constraints={
-                "video": {"width": 640, "height": 480, "frameRate": 15},
+                "video": {
+                    "width": {"ideal": 640, "max": 1280},
+                    "height": {"ideal": 480, "max": 720},
+                    "frameRate": {"ideal": 15, "max": 30}
+                },
                 "audio": False
             },
             async_processing=True,
+            rtc_configuration={
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            }
         )
     
     with col2:
@@ -502,8 +882,3 @@ elif mode == "Phone Camera (WebRTC)":
 # Footer
 st.markdown("---")
 st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc.__version__}")
-
-# Auto-refresh every 2 seconds to keep UI responsive
-time.sleep(0.1)
-if st.session_state.frame_count % 20 == 0:  # Refresh every 20 frames
-    st.rerun()
