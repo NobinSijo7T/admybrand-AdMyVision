@@ -7,7 +7,7 @@ import streamlit as st
 # Page configuration for standalone deployment
 st.set_page_config(
     page_title="AdMyVision - Object Detection",
-    page_icon="🎯",
+    page_icon="src/logo black.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -1051,8 +1051,12 @@ if net is None:
     st.stop()
 
 # Header
-st.title("🎯 AdMyVision - Real-time Object Detection")
-st.markdown("### 🚀 AI-Powered Object Detection with Voice Announcements")
+col1, col2 = st.columns([1, 8])
+with col1:
+    st.image("src/logo black.png", width=100)
+with col2:
+    st.title("AdMyVision - Real-time Object Detection")
+    st.markdown("### 🚀 AI-Powered Object Detection with Voice Announcements")
 
 # Add global speech synthesis initialization
 if voice_manager and voice_manager.voice_enabled:
@@ -1800,7 +1804,54 @@ if 'console_initialized' not in st.session_state:
     add_console_message(f"Voice Engine: {'Browser Speech Synthesis' if GTTS_AVAILABLE else 'Disabled'}", "info")
     st.session_state.console_initialized = True
 
-# Footer
+# Modern Footer
 st.markdown("---")
-aiortc_version = aiortc.__version__ if AIORTC_AVAILABLE and aiortc else "Not Available"
-st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc_version}")
+
+# Define aiortc version
+try:
+    aiortc_version = aiortc.__version__ if AIORTC_AVAILABLE and aiortc else "Not Available"
+except AttributeError:
+    aiortc_version = "Not Available"
+
+st.markdown(
+    """
+    <div style="
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-top: 2rem;
+        text-align: center;
+        color: white;
+    ">
+        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: -2rem">
+            <img src="src/logo black.png" alt="AdMyVision " style="width: 60px; height: 60px;">
+        </div>
+        <p style="margin: 0.5rem 0; font-size: 16px; opacity: 0.9;">
+            <em>Advanced Detection for My Senses</em>
+        </p>
+        <div style="margin: 1.5rem 0;">
+            <span style="background: rgba(255,255,255,0.2); padding: 0.3rem 0.8rem; border-radius: 20px; margin: 0 0.5rem; font-size: 14px;">
+                🤖 AI-Powered
+            </span>
+            <span style="background: rgba(255,255,255,0.2); padding: 0.3rem 0.8rem; border-radius: 20px; margin: 0 0.5rem; font-size: 14px;">
+                📱 Real-time
+            </span>
+            <span style="background: rgba(255,255,255,0.2); padding: 0.3rem 0.8rem; border-radius: 20px; margin: 0 0.5rem; font-size: 14px;">
+                🔊 Voice Enabled
+            </span>
+        </div>
+        <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.3);">
+            <p style="margin: 0; font-size: 14px; opacity: 0.8;">
+                Built with ❤️ using Streamlit & WebRTC | © 2025 AdMyVision
+            </p>
+            <p style="margin: 0.5rem 0 0 0; font-size: 12px; opacity: 0.7;">
+                <strong>Streamlit-WebRTC</strong>: {st_webrtc_version} | <strong>aiortc</strong>: {aiortc_version}
+            </p>
+        </div>
+    </div>
+    """.format(
+        st_webrtc_version=st_webrtc_version,
+        aiortc_version=aiortc_version
+    ),
+    unsafe_allow_html=True
+)
