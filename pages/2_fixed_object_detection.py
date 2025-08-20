@@ -1062,13 +1062,54 @@ if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
         else:
             st.sidebar.success("🎤 Voice ON (Windows)")
         
-        # Add test voice button with user interaction
+        # Add test voice button with direct browser speech
         if st.sidebar.button("🎯 Test Voice"):
-            if voice_manager:
-                # Use the simple test method
-                voice_manager.test_voice_simple("Hello! Voice test successful. Object detection audio is working.")
-                st.sidebar.success("🎤 Voice test initiated! Check browser console if no audio.")
-                st.sidebar.info("💡 If no sound, try clicking anywhere on the page first.")
+            # Use direct browser speech synthesis without relying on voice_manager methods
+            test_text = "Hello! Voice test successful. Object detection audio is working."
+            
+            # Create direct JavaScript for voice testing
+            speech_test_js = f"""
+            <div style="height: 1px;">
+                <script>
+                console.log('🎯 Direct voice test initiated');
+                
+                if ('speechSynthesis' in window) {{
+                    // Cancel any ongoing speech
+                    speechSynthesis.cancel();
+                    
+                    setTimeout(function() {{
+                        var utterance = new SpeechSynthesisUtterance('{test_text}');
+                        utterance.rate = 0.8;
+                        utterance.pitch = 1.0;
+                        utterance.volume = 1.0;
+                        utterance.lang = 'en-US';
+                        
+                        utterance.onstart = function() {{
+                            console.log('✅ Voice test started successfully');
+                        }};
+                        
+                        utterance.onend = function() {{
+                            console.log('✅ Voice test completed successfully');
+                        }};
+                        
+                        utterance.onerror = function(event) {{
+                            console.error('❌ Voice test failed:', event.error);
+                        }};
+                        
+                        speechSynthesis.speak(utterance);
+                        console.log('🚀 Direct voice test speech initiated');
+                    }}, 100);
+                }} else {{
+                    console.error('❌ Speech synthesis not supported');
+                }}
+                </script>
+            </div>
+            """
+            
+            # Display the test
+            components.html(speech_test_js, height=1)
+            st.sidebar.success("🎤 Voice test initiated! Check browser console if no audio.")
+            st.sidebar.info("💡 If no sound, try clicking anywhere on the page first.")
     else:
         st.sidebar.info("🔇 Voice OFF")
 else:
