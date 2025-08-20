@@ -2,6 +2,16 @@
 Fixed version addressing video freezing and mobile connection issues.
 """
 
+import streamlit as st
+
+# Page configuration for standalone deployment
+st.set_page_config(
+    page_title="AdMyVision - Object Detection",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 import logging
 import queue
 import time
@@ -513,7 +523,9 @@ if net is None:
     st.stop()
 
 # Header
-st.title("🎯 Real-time Object Detection")
+st.title("🎯 AdMyVision - Real-time Object Detection")
+st.markdown("### 🚀 AI-Powered Object Detection with Voice Announcements")
+st.markdown("---")
 st.markdown("---")
 
 # Initialize session state
