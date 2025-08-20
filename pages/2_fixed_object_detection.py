@@ -79,6 +79,10 @@ except ImportError:
 # Additional imports
 import tempfile
 import os
+import queue
+
+# Global voice announcement queue
+voice_queue = queue.Queue()
 
 # Try to import download utility
 try:
@@ -1250,7 +1254,7 @@ class ObjectDetector:
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                         
                         # Voice announcement (if enabled)
-                        # Use direct voice synthesis since we can't use Streamlit components in video thread
+                        # Use global queue system for thread-safe voice announcements
                         if (voice_manager and voice_manager.voice_enabled):
                             current_time = time.time()
                             object_name = self.classes[class_id]
@@ -1267,7 +1271,7 @@ class ObjectDetector:
                                     should_announce = True
                             
                             if should_announce:
-                                print(f"Attempting voice announcement for {object_name} at {distance:.1f}m")
+                                print(f"🎤 Queuing voice announcement for {object_name} at {distance:.1f}m")
                                 
                                 # Update timing
                                 self.last_announcements[object_name] = current_time
@@ -1280,63 +1284,12 @@ class ObjectDetector:
                                     distance_text = f"{distance:.1f} meters"
                                 announcement = f"Detected {object_name} at {distance_text}"
                                 
-                                # Try different voice methods based on availability
+                                # Add to global voice queue
                                 try:
-                                    # Method 1: Try pyttsx3 if available (Windows/Desktop)
-                                    if VOICE_AVAILABLE and pyttsx3:
-                                        import threading
-                                        def speak_pyttsx3():
-                                            try:
-                                                engine = pyttsx3.init()
-                                                engine.setProperty('rate', 160)
-                                                engine.setProperty('volume', 1.0)
-                                                engine.say(announcement)
-                                                engine.runAndWait()
-                                                print(f"✅ pyttsx3 announcement: {announcement}")
-                                            except Exception as e:
-                                                print(f"❌ pyttsx3 failed: {e}")
-                                        
-                                        thread = threading.Thread(target=speak_pyttsx3, daemon=True)
-                                        thread.start()
-                                        
-                                    # Method 2: Try Google TTS with pygame (if available)
-                                    elif GTTS_AVAILABLE and PYGAME_AVAILABLE and gTTS and pygame:
-                                        import threading
-                                        import tempfile
-                                        import os
-                                        def speak_gtts():
-                                            try:
-                                                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-                                                    temp_filename = temp_file.name
-                                                
-                                                tts = gTTS(text=announcement, lang='en', slow=False)
-                                                tts.save(temp_filename)
-                                                
-                                                pygame.mixer.music.load(temp_filename)
-                                                pygame.mixer.music.play()
-                                                
-                                                while pygame.mixer.music.get_busy():
-                                                    time.sleep(0.1)
-                                                
-                                                os.unlink(temp_filename)
-                                                print(f"✅ Google TTS announcement: {announcement}")
-                                            except Exception as e:
-                                                print(f"❌ Google TTS failed: {e}")
-                                        
-                                        thread = threading.Thread(target=speak_gtts, daemon=True)
-                                        thread.start()
-                                    
-                                    # Method 3: Store announcement for browser speech (fallback)
-                                    else:
-                                        # Store announcement in session state for main thread to handle
-                                        if hasattr(st, 'session_state'):
-                                            if 'pending_voice_announcements' not in st.session_state:
-                                                st.session_state.pending_voice_announcements = []
-                                            st.session_state.pending_voice_announcements.append(announcement)
-                                            print(f"📝 Stored announcement for browser speech: {announcement}")
-                                        
-                                except Exception as e:
-                                    print(f"❌ Voice announcement failed: {e}")
+                                    voice_queue.put(announcement, block=False)
+                                    print(f"✅ Voice announcement queued: {announcement}")
+                                except queue.Full:
+                                    print("⚠️ Voice queue full, skipping announcement")
                             else:
                                 print(f"Voice announcement skipped (cooldown): {object_name}")
                         else:
@@ -1425,34 +1378,89 @@ if mode == "PC Camera":
         else:
             st.info("📹 Camera Inactive - Click Start to begin")
         
-        # Handle pending voice announcements from video thread
-        if camera_status and 'pending_voice_announcements' in st.session_state and st.session_state.pending_voice_announcements:
-            for announcement in st.session_state.pending_voice_announcements:
-                # Use browser speech synthesis for announcements stored by video thread
+        # Handle voice announcements from global queue
+        if camera_status and voice_manager and voice_manager.voice_enabled:
+            announcements_to_play = []
+            
+            # Get all pending announcements from the queue
+            try:
+                while not voice_queue.empty():
+                    announcement = voice_queue.get_nowait()
+                    announcements_to_play.append(announcement)
+            except queue.Empty:
+                pass
+            
+            # Play announcements using browser speech synthesis
+            for announcement in announcements_to_play:
+                print(f"🎤 Playing announcement: {announcement}")
+                
+                # Escape text for JavaScript
+                escaped_announcement = announcement.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
+                
+                # Create browser speech component
                 announcement_js = f"""
                 <div style="display: none;">
                     <script>
                     (function() {{
-                        console.log('🎤 Playing pending announcement: {announcement}');
+                        console.log('🎤 PC Camera announcement: {escaped_announcement}');
                         if ('speechSynthesis' in window) {{
+                            // Cancel any ongoing speech
                             speechSynthesis.cancel();
+                            
+                            // Small delay to ensure cancellation
                             setTimeout(function() {{
-                                var utterance = new SpeechSynthesisUtterance('{announcement}');
+                                var utterance = new SpeechSynthesisUtterance('{escaped_announcement}');
                                 utterance.rate = 0.8;
                                 utterance.pitch = 1.0;
                                 utterance.volume = 1.0;
                                 utterance.lang = 'en-US';
+                                
+                                // Get available voices and select best one
+                                var voices = speechSynthesis.getVoices();
+                                if (voices.length > 0) {{
+                                    var bestVoice = voices.find(v => v.lang === 'en-US' && !v.localService) ||
+                                                   voices.find(v => v.lang.startsWith('en')) ||
+                                                   voices[0];
+                                    if (bestVoice) {{
+                                        utterance.voice = bestVoice;
+                                    }}
+                                }}
+                                
+                                // Event handlers
+                                utterance.onstart = function() {{
+                                    console.log('✅ Voice announcement started: {escaped_announcement}');
+                                }};
+                                
+                                utterance.onend = function() {{
+                                    console.log('✅ Voice announcement completed: {escaped_announcement}');
+                                }};
+                                
+                                utterance.onerror = function(event) {{
+                                    console.error('❌ Voice announcement failed:', event.error);
+                                }};
+                                
+                                // Speak the announcement
                                 speechSynthesis.speak(utterance);
+                                
                             }}, 100);
+                        }} else {{
+                            console.error('❌ Speech synthesis not supported');
                         }}
                     }})();
                     </script>
                 </div>
                 """
+                
+                # Display the component
                 components.html(announcement_js, height=1)
-            
-            # Clear processed announcements
-            st.session_state.pending_voice_announcements = []
+        
+        # Voice status indicator
+        if voice_manager and voice_manager.voice_enabled:
+            queue_size = voice_queue.qsize()
+            if queue_size > 0:
+                st.info(f"🎤 Processing {queue_size} voice announcement(s)...")
+            else:
+                st.success("🎤 Voice Ready")
         
         # Model status
         if net is not None:
@@ -1563,34 +1571,83 @@ elif mode == "Phone Camera (WebRTC)":
         else:
             st.error("❌ Not Connected")
     
-    # Handle pending voice announcements for phone camera
-    if webrtc_ctx.state.playing and 'pending_voice_announcements' in st.session_state and st.session_state.pending_voice_announcements:
-        for announcement in st.session_state.pending_voice_announcements:
-            # Use browser speech synthesis for mobile compatibility
+    # Handle voice announcements for phone camera
+    if webrtc_ctx.state.playing and voice_manager and voice_manager.voice_enabled:
+        announcements_to_play = []
+        
+        # Get all pending announcements from the queue
+        try:
+            while not voice_queue.empty():
+                announcement = voice_queue.get_nowait()
+                announcements_to_play.append(announcement)
+        except queue.Empty:
+            pass
+        
+        # Play announcements using browser speech synthesis (mobile optimized)
+        for announcement in announcements_to_play:
+            print(f"📱 Playing mobile announcement: {announcement}")
+            
+            # Escape text for JavaScript
+            escaped_announcement = announcement.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
+            
+            # Mobile-optimized browser speech component
             announcement_js = f"""
             <div style="display: none;">
                 <script>
                 (function() {{
-                    console.log('📱 Mobile announcement: {announcement}');
+                    console.log('📱 Mobile announcement: {escaped_announcement}');
                     if ('speechSynthesis' in window) {{
+                        // Cancel any ongoing speech
                         speechSynthesis.cancel();
+                        
+                        // Longer delay for mobile devices
                         setTimeout(function() {{
-                            var utterance = new SpeechSynthesisUtterance('{announcement}');
+                            var utterance = new SpeechSynthesisUtterance('{escaped_announcement}');
                             utterance.rate = 0.8;
                             utterance.pitch = 1.0;
                             utterance.volume = 1.0;
                             utterance.lang = 'en-US';
+                            
+                            // Mobile-friendly voice selection
+                            var voices = speechSynthesis.getVoices();
+                            if (voices.length > 0) {{
+                                // Prefer local voices for mobile
+                                var bestVoice = voices.find(v => v.localService && v.lang.startsWith('en')) ||
+                                               voices.find(v => v.lang.startsWith('en')) ||
+                                               voices[0];
+                                if (bestVoice) {{
+                                    utterance.voice = bestVoice;
+                                    console.log('📱 Selected mobile voice:', bestVoice.name);
+                                }}
+                            }}
+                            
+                            // Event handlers
+                            utterance.onstart = function() {{
+                                console.log('✅ Mobile voice started: {escaped_announcement}');
+                            }};
+                            
+                            utterance.onend = function() {{
+                                console.log('✅ Mobile voice completed: {escaped_announcement}');
+                            }};
+                            
+                            utterance.onerror = function(event) {{
+                                console.error('❌ Mobile voice failed:', event.error);
+                            }};
+                            
+                            // Speak the announcement
                             speechSynthesis.speak(utterance);
-                        }}, 150);
+                            
+                        }}, 200);
+                    }} else {{
+                        console.error('❌ Speech synthesis not supported on mobile');
                     }}
                 }})();
                 </script>
             </div>
             """
+            
+            # Display the component
             components.html(announcement_js, height=1)
-        
-        # Clear processed announcements
-        st.session_state.pending_voice_announcements = []
     
     # Detection results
     if webrtc_ctx.state.playing:
