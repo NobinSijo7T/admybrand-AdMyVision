@@ -21,7 +21,12 @@ from typing import List, NamedTuple
 import socket
 
 import av
-import cv2
+try:
+    import cv2
+except ImportError:
+    st.error("❌ OpenCV not installed. Please install opencv-python-headless")
+    st.stop()
+
 import numpy as np
 import qrcode
 import streamlit as st
