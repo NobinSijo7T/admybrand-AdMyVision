@@ -38,7 +38,13 @@ from streamlit_webrtc import (
     __version__ as st_webrtc_version,
 )
 import streamlit.components.v1 as components
-import aiortc
+try:
+    import aiortc
+    AIORTC_AVAILABLE = True
+except ImportError:
+    aiortc = None
+    AIORTC_AVAILABLE = False
+    print("aiortc not available - WebRTC functionality may be limited")
 
 # Try to import pyttsx3 with proper error handling
 try:
@@ -1117,4 +1123,5 @@ elif mode == "Phone Camera (WebRTC)":
 
 # Footer
 st.markdown("---")
-st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc.__version__}")
+aiortc_version = aiortc.__version__ if AIORTC_AVAILABLE and aiortc else "Not Available"
+st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc_version}")
