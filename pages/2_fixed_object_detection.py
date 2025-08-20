@@ -309,17 +309,10 @@ class VoiceManager:
         announcement = f"Detected {object_name} at {distance_text}"
         print(f"Voice announcement: {announcement}")  # Debug output
         
-        # Choose TTS method - prefer browser speech for mobile compatibility
-        user_agent = st.context.headers.get("user-agent", "").lower() if hasattr(st.context, 'headers') else ""
-        is_mobile = any(device in user_agent for device in ["mobile", "android", "iphone", "ipad"])
-        
-        if is_mobile:
-            # Use browser speech synthesis for mobile devices
-            self._speak_with_browser(announcement)
-        elif self.use_gtts or not self.engine:
-            self._speak_with_gtts(announcement)
-        else:
-            self._speak_with_pyttsx3(announcement)
+        # ALWAYS use browser speech synthesis for maximum compatibility
+        # This ensures voice works on all platforms including mobile and web deployment
+        print("🌐 Using browser speech synthesis for maximum compatibility")
+        self._speak_with_browser(announcement)
     
     def _speak_with_pyttsx3(self, text):
         """Speak using pyttsx3 engine with simple, reliable approach"""
@@ -411,45 +404,88 @@ class VoiceManager:
     def _speak_with_browser(self, text):
         """Use browser's speech synthesis for mobile compatibility"""
         try:
+            # Escape text for JavaScript to prevent injection issues
+            escaped_text = text.replace("'", "\\'").replace('"', '\\"')
+            
             # JavaScript speech synthesis for browser compatibility
             speech_js = f"""
-            <script>
-            function speakText() {{
-                if ('speechSynthesis' in window) {{
-                    var utterance = new SpeechSynthesisUtterance(`{text}`);
-                    utterance.rate = 0.9;
-                    utterance.pitch = 1.0;
-                    utterance.volume = 1.0;
-                    
-                    // Try to use a female voice if available
-                    var voices = speechSynthesis.getVoices();
-                    for (var i = 0; i < voices.length; i++) {{
-                        if (voices[i].name.includes('Female') || voices[i].name.includes('Zira') || 
-                            voices[i].name.includes('Google') && voices[i].gender === 'female') {{
-                            utterance.voice = voices[i];
-                            break;
+            <div id="speech-container" style="display: none;">
+                <script>
+                console.log('Initializing browser speech synthesis...');
+                
+                function speakText() {{
+                    console.log('speakText called');
+                    if ('speechSynthesis' in window) {{
+                        // Cancel any ongoing speech
+                        speechSynthesis.cancel();
+                        
+                        // Create utterance
+                        var utterance = new SpeechSynthesisUtterance('{escaped_text}');
+                        utterance.rate = 0.8;
+                        utterance.pitch = 1.0;
+                        utterance.volume = 1.0;
+                        
+                        // Get available voices
+                        var voices = speechSynthesis.getVoices();
+                        console.log('Available voices:', voices.length);
+                        
+                        // Try to select a good voice
+                        if (voices.length > 0) {{
+                            // Try to find English female voice first
+                            var selectedVoice = voices.find(voice => 
+                                voice.lang.startsWith('en') && 
+                                (voice.name.toLowerCase().includes('female') || 
+                                 voice.name.toLowerCase().includes('zira') ||
+                                 voice.name.toLowerCase().includes('samantha'))
+                            ) || voices.find(voice => voice.lang.startsWith('en')) || voices[0];
+                            
+                            utterance.voice = selectedVoice;
+                            console.log('Selected voice:', selectedVoice.name);
                         }}
+                        
+                        // Add event listeners
+                        utterance.onstart = function() {{
+                            console.log('Speech started: {escaped_text}');
+                        }};
+                        utterance.onend = function() {{
+                            console.log('Speech ended: {escaped_text}');
+                        }};
+                        utterance.onerror = function(event) {{
+                            console.error('Speech error:', event.error);
+                        }};
+                        
+                        // Speak the text
+                        speechSynthesis.speak(utterance);
+                        console.log('Browser speech synthesis initiated: {escaped_text}');
+                    }} else {{
+                        console.log('Speech synthesis not supported in this browser');
                     }}
-                    
-                    speechSynthesis.speak(utterance);
-                    console.log('Browser speech synthesis: {text}');
-                }} else {{
-                    console.log('Speech synthesis not supported');
                 }}
-            }}
-            
-            // Wait for voices to load and then speak
-            if (speechSynthesis.getVoices().length === 0) {{
-                speechSynthesis.addEventListener('voiceschanged', speakText);
-            }} else {{
-                speakText();
-            }}
-            </script>
+                
+                // Load voices and speak
+                function initAndSpeak() {{
+                    var voices = speechSynthesis.getVoices();
+                    if (voices.length === 0) {{
+                        console.log('Waiting for voices to load...');
+                        speechSynthesis.addEventListener('voiceschanged', function() {{
+                            console.log('Voices loaded, speaking now...');
+                            speakText();
+                        }}, {{ once: true }});
+                    }} else {{
+                        console.log('Voices already loaded, speaking immediately...');
+                        speakText();
+                    }}
+                }}
+                
+                // Start the process
+                initAndSpeak();
+                </script>
+            </div>
             """
             
-            # Display the JavaScript component
-            components.html(speech_js, height=0)
-            print(f"Browser speech synthesis: {text}")
+            # Display the JavaScript component with a small height to ensure execution
+            components.html(speech_js, height=1)
+            print(f"Browser speech synthesis initiated: {text}")
             
         except Exception as e:
             print(f"Browser speech synthesis error: {e}")
@@ -458,6 +494,12 @@ class VoiceManager:
         """Speak using Google Text-to-Speech with proper state management"""
         if not GTTS_AVAILABLE or not gTTS:
             print("Google TTS not available, using browser speech synthesis")
+            self._speak_with_browser(text)
+            return
+        
+        # If pygame is not available, use browser speech directly 
+        if not PYGAME_AVAILABLE or not pygame:
+            print("Pygame not available, using browser speech for audio playback")
             self._speak_with_browser(text)
             return
             
@@ -470,24 +512,21 @@ class VoiceManager:
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
                     temp_filename = temp_file.name
                 
+                print(f"Generating Google TTS audio for: {text}")
                 # Generate speech with Google TTS
                 tts = gTTS(text=text, lang='en', slow=False)
                 tts.save(temp_filename)
                 
-                # Play the audio file (only if pygame is available)
-                if PYGAME_AVAILABLE and pygame:
-                    pygame.mixer.music.load(temp_filename)
-                    pygame.mixer.music.play()
-                    
-                    # Wait for playback to complete
-                    while pygame.mixer.music.get_busy():
-                        time.sleep(0.1)
-                    
-                    print(f"Successfully announced with Google TTS + pygame: {text}")
-                else:
-                    # If pygame not available, fall back to browser speech
-                    print(f"Pygame not available, using browser speech: {text}")
-                    self._speak_with_browser(text)
+                print(f"Playing Google TTS audio with pygame...")
+                # Play the audio file with pygame
+                pygame.mixer.music.load(temp_filename)
+                pygame.mixer.music.play()
+                
+                # Wait for playback to complete
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+                
+                print(f"Successfully announced with Google TTS + pygame: {text}")
                 
                 # Clean up temporary file
                 try:
@@ -497,6 +536,11 @@ class VoiceManager:
                 
             except Exception as e:
                 print(f"Google TTS announcement failed: {e}")
+                # Fallback to browser speech if Google TTS fails
+                print("Falling back to browser speech synthesis...")
+                self.is_speaking = False  # Reset flag before fallback
+                self._speak_with_browser(text)
+                return
             finally:
                 # Always clear the speaking flag
                 self.is_speaking = False
