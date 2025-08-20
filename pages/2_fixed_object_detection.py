@@ -1210,6 +1210,12 @@ class ObjectDetector:
         self.last_announcements = {}  # Track last announcement time per object
         self.announcement_cooldown = 3.0  # Seconds between same object announcements
         self.last_announcement_time = 0  # Global cooldown
+        
+        # Mobile stability improvements to reduce frame confusion
+        self.detection_history = []  # Store last few frames of detections
+        self.history_size = 5  # Number of frames to consider for stability
+        self.stable_detections = []  # Confirmed stable detections
+        self.min_detection_frames = 2  # Minimum frames an object must appear to be considered stable
     
     def estimate_distance(self, bbox_area, object_name):
         """Estimate distance based on bounding box area"""
@@ -1245,6 +1251,43 @@ class ObjectDetector:
             return min(distance_m, 10.0)  # Cap at 10 meters for realism
         
         return 0.0
+    
+    def check_detection_stability(self, current_detections):
+        """Check if detections are stable across frames to reduce mobile confusion"""
+        # Add current detections to history
+        frame_detections = [(det.label, det.score) for det in current_detections]
+        self.detection_history.append(frame_detections)
+        
+        # Keep only recent history
+        if len(self.detection_history) > self.history_size:
+            self.detection_history.pop(0)
+        
+        # If we don't have enough history, return current detections
+        if len(self.detection_history) < self.min_detection_frames:
+            return current_detections
+        
+        # Count object appearances across recent frames
+        object_counts = {}
+        for frame_dets in self.detection_history:
+            for obj_name, confidence in frame_dets:
+                if obj_name not in object_counts:
+                    object_counts[obj_name] = []
+                object_counts[obj_name].append(confidence)
+        
+        # Filter to only stable objects (appearing in multiple frames)
+        stable_objects = {}
+        for obj_name, confidences in object_counts.items():
+            if len(confidences) >= self.min_detection_frames:
+                # Use average confidence for stable objects
+                stable_objects[obj_name] = sum(confidences) / len(confidences)
+        
+        # Return only detections for stable objects
+        stable_detections = []
+        for det in current_detections:
+            if det.label in stable_objects:
+                stable_detections.append(det)
+        
+        return stable_detections
     
     def detect_objects(self, frame: av.VideoFrame) -> av.VideoFrame:
         """Process video frames for object detection."""
@@ -1350,25 +1393,28 @@ class ObjectDetector:
                             else:
                                 print("🔇 Voice announcement skipped - no voice_manager")
             
-            # Update total count (only count new detection instances)
-            if len(detection_list) > 0:
+            # Apply stability check to reduce mobile frame confusion
+            stable_detection_list = self.check_detection_stability(detection_list)
+            
+            # Update total count (only count new detection instances) - use stable detections
+            if len(stable_detection_list) > 0:
                 if self.frame_count - self.last_detection_frame > 30:  # New detection session
-                    self.total_objects += len(detection_list)
+                    self.total_objects += len(stable_detection_list)
                     self.last_detection_frame = self.frame_count
             
-            # Store current detections
-            self.current_detections = detection_list
+            # Store current detections (use stable detections for consistency)
+            self.current_detections = stable_detection_list
             
-            # Update session state (non-blocking)
+            # Update session state (non-blocking) - use stable detections to reduce mobile confusion
             try:
                 # Clear old results
                 while not result_queue.empty():
                     result_queue.get_nowait()
                     
-                # Store both current detections and counts
+                # Store both stable detections and counts
                 result_data = {
-                    'detections': detection_list,
-                    'current_count': len(detection_list),
+                    'detections': stable_detection_list,
+                    'current_count': len(stable_detection_list),
                     'total_count': self.total_objects,
                     'frame_count': self.frame_count
                 }
@@ -1521,6 +1567,7 @@ if mode == "PC Camera":
 
 elif mode == "Phone Camera (WebRTC)":
     st.subheader("📱 Phone Camera Detection")
+    st.success("✨ **Enhanced Mobile Experience**: Improved stability with smart detection filtering to reduce frame confusion")
     st.info("📢 **Voice Announcements:** Mobile devices use browser speech synthesis. Ensure your browser has voice synthesis enabled and volume is up.")
     
     # Camera selection for mobile devices
@@ -1552,21 +1599,27 @@ elif mode == "Phone Camera (WebRTC)":
         st.info("📱 **Connect Your Phone:**")
         
         # Generate QR code
-        local_ip = get_local_ip()
-        url = f"http://{local_ip}:8501"
-        qr_image = generate_qr_code(url)
+        # Use Streamlit Cloud deployment URL instead of local IP
+        deployment_url = "https://nobinsijo7t-admybrand-admy-pages2-fixed-object-detection-dqerbk.streamlit.app/"
+        qr_image = generate_qr_code(deployment_url)
         
-        st.image(qr_image, caption=f"Scan with phone: {url}", width=200)
+        st.image(qr_image, caption=f"Scan with phone: {deployment_url}", width=200)
         
         st.markdown("**📋 Instructions:**")
         st.markdown("""
-        1. 📱 Scan QR code with phone camera
-        2. 🌐 Open the link in browser
-        3. ✅ Allow camera permissions
-        4. 📄 Select this same page
+        1. 📱 Scan QR code with phone camera (or visit the URL directly)
+        2. 🌐 Open in mobile browser (Chrome/Safari recommended)
+        3. ✅ Allow camera permissions when prompted
+        4. 📄 Navigate to "2 Fixed Object Detection" page
         5. 📹 Choose 'Phone Camera (WebRTC)' mode
-        6. 🔄 Select camera direction above
+        6. 🔄 Select camera direction and quality above
+        7. 🎯 Point camera at objects for detection
         """)
+        
+        # Enhanced mobile info
+        st.markdown("**📱 Mobile Optimization:**")
+        st.success("✨ **Improved Stability**: Reduced frame confusion with smart detection filtering")
+        st.info("🌐 **Cloud Deployment**: No local network setup needed - works anywhere with internet")
         
         # Voice compatibility info for mobile
         st.markdown("**🔊 Mobile Voice Notes:**")
