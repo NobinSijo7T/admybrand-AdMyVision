@@ -94,7 +94,25 @@ class VoiceManager:
         """Initialize the text-to-speech engine with fallback options"""
         print(f"Initializing voice engine - VOICE_AVAILABLE: {VOICE_AVAILABLE}, GTTS_AVAILABLE: {GTTS_AVAILABLE}")
         
-        # Try pyttsx3 first
+        # For cloud deployment, prefer Google TTS over pyttsx3
+        import platform
+        is_cloud = platform.system() == "Linux" or "STREAMLIT_SHARING" in os.environ
+        
+        if is_cloud:
+            print("Cloud environment detected, prioritizing Google TTS...")
+            # Try Google TTS first for cloud deployment
+            if GTTS_AVAILABLE:
+                try:
+                    print("Attempting Google TTS initialization...")
+                    # Initialize pygame mixer for audio playback
+                    pygame.mixer.init()
+                    self.use_gtts = True
+                    print("✅ Google Text-to-Speech initialized successfully")
+                    return
+                except Exception as e:
+                    print(f"❌ Google TTS initialization failed: {e}")
+        
+        # Try pyttsx3 first for local development
         if VOICE_AVAILABLE:
             try:
                 print("Attempting pyttsx3 initialization...")
@@ -102,7 +120,7 @@ class VoiceManager:
                 if hasattr(pythoncom, 'CoInitialize'):
                     pythoncom.CoInitialize()
                 
-                # Try different driver options for better Windows compatibility
+                # Try different driver options for better compatibility
                 drivers = ['sapi5', 'nsss', 'espeak']
                 for driver in drivers:
                     try:
@@ -145,9 +163,9 @@ class VoiceManager:
                 self.engine = None
         
         # Fallback to Google TTS if pyttsx3 fails
-        if GTTS_AVAILABLE:
+        if GTTS_AVAILABLE and not self.use_gtts:
             try:
-                print("Attempting Google TTS initialization...")
+                print("Attempting Google TTS fallback...")
                 # Initialize pygame mixer for audio playback
                 pygame.mixer.init()
                 self.use_gtts = True
@@ -155,6 +173,8 @@ class VoiceManager:
                 return
             except Exception as e:
                 print(f"❌ Google TTS initialization failed: {e}")
+        
+        print("❌ No voice engines available")
         
         print("No voice engine available - both pyttsx3 and Google TTS failed")
     
@@ -390,15 +410,17 @@ voice_manager = get_voice_manager()
 
 # Show warning if voice is not available
 if not voice_manager:
-    st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
+    st.sidebar.warning("⚠️ Voice functionality disabled - voice engines not available")
+    st.sidebar.info("💡 This might be due to cloud platform limitations")
 elif not voice_manager.engine and not voice_manager.use_gtts:
-    st.sidebar.warning("⚠️ Voice functionality disabled - install pyttsx3 or gtts+pygame")
+    st.sidebar.warning("⚠️ Voice functionality disabled - engine initialization failed")
+    st.sidebar.info("💡 Try refreshing the page or check system dependencies")
 else:
     # Show which voice engine is being used
     if voice_manager.use_gtts:
-        st.sidebar.info("🌐 Using Google Text-to-Speech")
+        st.sidebar.success("🌐 Using Google Text-to-Speech")
     else:
-        st.sidebar.info("🔊 Using Windows Voice Engine")
+        st.sidebar.success("🔊 Using Windows Voice Engine")
 
 # Page configuration
 st.set_page_config(
@@ -534,6 +556,7 @@ if voice_manager and (voice_manager.engine or voice_manager.use_gtts):
     if voice_enabled:
         if voice_manager.use_gtts:
             st.sidebar.success("🎤 Voice ON (Google TTS)")
+            st.sidebar.info("🔊 Audio will play through your device speakers")
         else:
             st.sidebar.success("🎤 Voice ON (Windows)")
         # Add test voice button
