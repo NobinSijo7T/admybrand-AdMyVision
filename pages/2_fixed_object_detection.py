@@ -72,9 +72,6 @@ except ImportError:
 # Additional imports
 import tempfile
 import os
-    GTTS_AVAILABLE = True
-except ImportError:
-    GTTS_AVAILABLE = False
 
 from sample_utils.download import download_file
 
