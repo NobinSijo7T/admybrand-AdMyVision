@@ -1,5 +1,2 @@
 ffmpeg
-espeak
-espeak-data
-libespeak1
-alsa-utils
+libglib2.0-0

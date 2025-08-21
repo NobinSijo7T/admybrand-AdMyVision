@@ -1,9 +1,0 @@
-{
-  "duration_seconds": 30,
-  "mode": "wasm", 
-  "e2e_latency_ms": {"median": 145, "p95": 280},
-  "server_latency_ms": {"median": 45, "p95": 80},
-  "processed_fps": 12.3,
-  "bandwidth_kbps": {"uplink": 400, "downlink": 150},
-  "cpu_usage_percent": 35
-}

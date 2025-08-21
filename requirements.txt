@@ -4,7 +4,5 @@ opencv-python-headless
 numpy
 Pillow
 gtts
-pygame
-pyttsx3
 qrcode
 requests
