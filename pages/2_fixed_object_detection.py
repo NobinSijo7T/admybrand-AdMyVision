@@ -446,9 +446,13 @@ def generate_label_colors():
 def load_model():
     """Load the object detection model."""
     try:
+        # Initialize console logs if not exists
+        if 'console_logs' not in st.session_state:
+            st.session_state.console_logs = []
+        
         # Download models if needed
         if not MODEL_LOCAL_PATH.exists():
-            st.info("📥 Downloading MobileNet-SSD model...")
+            st.session_state.console_logs.append("📥 Downloading MobileNet-SSD model...")
             download_file(MODEL_URL, MODEL_LOCAL_PATH, expected_size=23147564)
         
         # Check for prototxt file (try both naming conventions)
@@ -456,10 +460,10 @@ def load_model():
         if not prototxt_path.exists() and PROTOTXT_ALT_PATH.exists():
             prototxt_path = PROTOTXT_ALT_PATH
         elif not prototxt_path.exists():
-            st.info("📥 Downloading model configuration...")
+            st.session_state.console_logs.append("📥 Downloading model configuration...")
             download_file(PROTOTXT_URL, PROTOTXT_LOCAL_PATH, expected_size=29353)
         
-        st.success(f"✅ Loading model from: {prototxt_path}")
+        st.session_state.console_logs.append(f"✅ Loading model from: {prototxt_path}")
         net = cv2.dnn.readNetFromCaffe(str(prototxt_path), str(MODEL_LOCAL_PATH))
         
         # Test the model with a dummy input
@@ -467,13 +471,15 @@ def load_model():
         net.setInput(dummy_blob)
         test_output = net.forward()
         
-        st.success(f"✅ Model loaded successfully! Output shape: {test_output.shape}")
+        st.session_state.console_logs.append(f"✅ Model loaded successfully! Output shape: {test_output.shape}")
         return net
         
     except Exception as e:
-        st.error(f"❌ Error loading model: {e}")
-        st.error(f"Model path: {MODEL_LOCAL_PATH}")
-        st.error(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}")
+        if 'console_logs' not in st.session_state:
+            st.session_state.console_logs = []
+        st.session_state.console_logs.append(f"❌ Error loading model: {e}")
+        st.session_state.console_logs.append(f"Model path: {MODEL_LOCAL_PATH}")
+        st.session_state.console_logs.append(f"Prototxt path: {prototxt_path if 'prototxt_path' in locals() else PROTOTXT_LOCAL_PATH}")
         return None
 
 def get_local_ip():
@@ -555,6 +561,48 @@ mode = st.sidebar.selectbox(
     "📹 Camera Source",
     ["PC Camera", "Phone Camera (WebRTC)"]
 )
+
+# Camera troubleshooting section
+with st.sidebar.expander("🔧 Camera Troubleshooting"):
+    st.markdown("""
+    **Camera Not Working?**
+    
+    **For PC Camera:**
+    - ✅ Allow camera permissions in browser
+    - ✅ Close other apps using camera
+    - ✅ Try refreshing the page
+    - ✅ Check if camera is properly connected
+    
+    **For Mobile Camera:**
+    - ✅ Use HTTPS (required for camera access)
+    - ✅ Allow camera permissions when prompted
+    - ✅ Use Chrome, Safari, or Edge browser
+    - ✅ Try switching between front/back camera
+    - ✅ Ensure stable internet connection
+    
+    **Still having issues?**
+    - Try restarting your browser
+    - Check browser camera settings
+    - Disable browser extensions temporarily
+    """)
+    
+    if st.button("🔄 Refresh Page", help="Force refresh the application"):
+        st.rerun()
+    
+    # Add camera permission checker
+    if st.button("📹 Check Camera Access"):
+        st.components.v1.html("""
+        <script>
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(function(stream) {
+                document.write("✅ Camera access granted!");
+                stream.getTracks().forEach(track => track.stop());
+            })
+            .catch(function(err) {
+                document.write("❌ Camera access denied: " + err.message);
+            });
+        </script>
+        """, height=50)
 
 # Result queue with limited size
 result_queue = queue.Queue(maxsize=2)
@@ -741,192 +789,139 @@ def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
 if mode == "PC Camera":
     st.subheader("📹 PC Camera Detection")
     
-    col1, col2 = st.columns([3, 1])
+    st.info("💻 **PC Camera Tips:**\n- Allow camera access when prompted\n- Check if other apps are using the camera\n- Try refreshing if camera doesn't start")
     
-    with col1:
-        webrtc_ctx = webrtc_streamer(
-            key="pc_camera",
-            mode=WebRtcMode.SENDRECV,
-            video_frame_callback=video_frame_callback,
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 640, "max": 1280},
-                    "height": {"ideal": 480, "max": 720},
-                    "frameRate": {"ideal": 15, "max": 30}
-                },
-                "audio": False
+    webrtc_ctx = webrtc_streamer(
+        key="pc_camera",
+        mode=WebRtcMode.SENDRECV,
+        video_frame_callback=video_frame_callback,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 640, "min": 320, "max": 1280},
+                "height": {"ideal": 480, "min": 240, "max": 720},
+                "frameRate": {"ideal": 15, "min": 10, "max": 30}
             },
-            async_processing=True,
-            rtc_configuration={
-                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-            }
-        )
+            "audio": False
+        },
+        async_processing=True,
+        rtc_configuration={
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]}
+            ]
+        }
+    )
     
-    with col2:
-        st.subheader("📊 Status")
-        
-        if webrtc_ctx.state.playing:
-            st.success("✅ Camera Active")
-        else:
-            st.error("❌ Camera Inactive")
-        
-        st.metric("Frames Processed", st.session_state.frame_count)
-        
-        # Model status
-        if net is not None:
-            st.success("✅ Model Loaded")
-        else:
-            st.error("❌ Model Failed")
-        
-        # Display current threshold
-        st.info(f"🎯 Threshold: {score_threshold:.2f}")
-        
-        # Display latest detections
-        st.subheader("🔍 Latest Detections")
-        
-        # Update detections from queue
-        current_detection_count = 0
-        total_detected = 0
-        try:
-            while not result_queue.empty():
-                result_data = result_queue.get_nowait()
-                if isinstance(result_data, dict):
-                    st.session_state.detections = result_data.get('detections', [])
-                    current_detection_count = result_data.get('current_count', 0)
-                    total_detected = result_data.get('total_count', 0)
-                    st.session_state.frame_count = result_data.get('frame_count', 0)
-                else:
-                    # Fallback for old format
-                    st.session_state.detections = result_data
-                    current_detection_count = len(result_data) if result_data else 0
-        except:
-            pass
-        
-        # Show detection statistics
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Current Objects", current_detection_count)
-        with col2:
-            st.metric("🎯 Total Objects Found", total_detected)
-        
-        # Reset button for total count
-        if st.button("🔄 Reset Total Count", help="Reset the total objects detected counter"):
-            detector.reset_total_count()
-            st.rerun()
-        
-        if st.session_state.detections:
-            for det in st.session_state.detections[:5]:  # Show top 5
-                confidence_color = "🟢" if det.score > 0.7 else "🟡" if det.score > 0.5 else "🔴"
-                st.write(f"{confidence_color} **{det.label}**: {det.score:.1%}")
-        else:
-            st.info("👀 Point camera at objects like:\n- Person\n- Car\n- Bottle\n- Chair\n- Cat/Dog")
-            
-        # Debug information
-        if st.checkbox("🔧 Debug Info"):
-            st.write(f"Model loaded: {net is not None}")
-            st.write(f"Threshold: {score_threshold}")
-            st.write(f"Frame count: {st.session_state.frame_count}")
-            st.write(f"Queue size: {result_queue.qsize()}")
+    # Camera status indicator
+    if webrtc_ctx.state.playing:
+        st.success("✅ Camera is active and streaming")
+    elif webrtc_ctx.state.signalling:
+        st.warning("🔄 Connecting to camera...")
+    else:
+        st.error("❌ Camera not connected. Please allow camera permissions and refresh if needed.")
 
 elif mode == "Phone Camera (WebRTC)":
     st.subheader("📱 Phone Camera Detection")
     
-    col1, col2 = st.columns([1, 1])
-    
+    # Camera selection for mobile
+    col1, col2 = st.columns([2, 1])
     with col1:
-        st.info("📱 **Connect Your Phone:**")
-        
-        # Generate QR code
-        local_ip = get_local_ip()
-        url = f"http://{local_ip}:8501"
-        qr_image = generate_qr_code(url)
-        
-        st.image(qr_image, caption=f"Scan with phone: {url}", width=200)
-        
-        st.markdown("**📋 Instructions:**")
-        st.markdown("""
-        1. Scan QR code with phone camera
-        2. Open the link in browser
-        3. Allow camera permissions
-        4. Select this same page
-        5. Choose 'PC Camera' mode on phone
-        """)
-    
+        st.info("📱 **Mobile Camera Tips:**\n- Allow camera permissions when prompted\n- Use HTTPS for camera access\n- Best with Chrome or Safari")
     with col2:
-        st.info("🌐 **Connection Status:**")
-        
-        # Simplified WebRTC for phone
-        # Improved mobile compatibility: set facingMode and add HTTPS/camera instructions
-        st.info("\n**Mobile Camera Streaming (WebRTC)**\n\n- Make sure you are using HTTPS (Streamlit Cloud does this automatically)\n- Grant camera permissions when prompted on your phone\n- If you see 'navigator.mediaDevices is undefined', your browser does not support camera access or is not using HTTPS.\n- For best results, use Chrome or Safari on your phone.\n")
-        webrtc_ctx = webrtc_streamer(
-            key="phone_camera",
-            mode=WebRtcMode.SENDRECV,
-            video_frame_callback=video_frame_callback,
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 640, "max": 1280},
-                    "height": {"ideal": 480, "max": 720},
-                    "frameRate": {"ideal": 10, "max": 15},
-                    "facingMode": "environment"  # Use back camera on mobile
-                },
-                "audio": False
-            },
-            async_processing=True,
-            rtc_configuration={
-                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-            }
+        camera_mode = st.selectbox(
+            "📷 Camera Selection:",
+            ["Back Camera", "Front Camera"],
+            help="Switch between front and back camera on mobile"
         )
-        if webrtc_ctx.state.playing:
-            st.success("✅ Phone Connected! Camera streaming.")
-        elif webrtc_ctx.state.signalling:
-            st.warning("🔄 Connecting...")
-        else:
-            st.error("❌ Not Connected. If on mobile, check camera permissions and HTTPS.")
-            st.info("If you see a camera error, try a different browser or check HTTPS.")
     
-    # Detection results
+    # Set facing mode based on selection
+    facing_mode = "environment" if camera_mode == "Back Camera" else "user"
+    
+    webrtc_ctx = webrtc_streamer(
+        key=f"phone_camera_{camera_mode.lower().replace(' ', '_')}",
+        mode=WebRtcMode.SENDRECV,
+        video_frame_callback=video_frame_callback,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 640, "min": 320, "max": 1280},
+                "height": {"ideal": 480, "min": 240, "max": 720},
+                "frameRate": {"ideal": 15, "min": 10, "max": 30},
+                "facingMode": facing_mode
+            },
+            "audio": False
+        },
+        async_processing=True,
+        rtc_configuration={
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]}
+            ]
+        }
+    )
+    
+    # Mobile camera status indicator
     if webrtc_ctx.state.playing:
-        st.subheader("🔍 Detection Results")
-        
-        # Update detections
-        current_phone_detections = 0
-        total_phone_detected = 0
-        try:
-            while not result_queue.empty():
-                result_data = result_queue.get_nowait()
-                if isinstance(result_data, dict):
-                    st.session_state.detections = result_data.get('detections', [])
-                    current_phone_detections = result_data.get('current_count', 0)
-                    total_phone_detected = result_data.get('total_count', 0)
-                else:
-                    # Fallback for old format
-                    st.session_state.detections = result_data
-                    current_phone_detections = len(result_data) if result_data else 0
-        except:
-            pass
-        
-        # Show detection statistics for phone camera
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Current Objects", current_phone_detections)
-        with col2:
-            st.metric("🎯 Total Objects Found", total_phone_detected)
-        
-        # Reset button for total count
-        if st.button("🔄 Reset Total Count", key="phone_reset", help="Reset the total objects detected counter"):
-            detector.reset_total_count()
-            st.rerun()
-        
-        if st.session_state.detections:
-            detection_data = [{
-                'Object': det.label.title(),
-                'Confidence': f"{det.score:.1%}",
-                'Position': f"({int(det.box[0])}, {int(det.box[1])})"
-            } for det in st.session_state.detections]
-            st.dataframe(detection_data, use_container_width=True)
-        else:
-            st.info("🔍 Point camera at objects to detect them")
+        st.success("✅ Mobile camera is active and streaming")
+    elif webrtc_ctx.state.signalling:
+        st.warning("🔄 Connecting to mobile camera...")
+    else:
+        st.error("❌ Mobile camera not connected. Please allow camera permissions and ensure you're using HTTPS.")
 
-# Footer
+# Console Display
 st.markdown("---")
-st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc.__version__}")
+st.subheader("🖥️ System Console")
+
+# Display console logs if they exist
+if 'console_logs' in st.session_state and st.session_state.console_logs:
+    console_container = st.container()
+    with console_container:
+        st.markdown("**Model Loading Information:**")
+        console_text = "\n".join(st.session_state.console_logs)
+        st.code(console_text, language=None)
+        
+        # Clear console button
+        if st.button("🗑️ Clear Console"):
+            st.session_state.console_logs = []
+            st.rerun()
+else:
+    st.info("💡 Console will show model loading information when the app starts")
+
+# Modern Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+           border-radius: 10px; margin-top: 30px; color: white;">
+    <h3 style="margin: 0; color: white;">🚀 AdMyVision - Object Detection Platform</h3>
+    <p style="margin: 10px 0; opacity: 0.9;">Powered by AI for Real-time Object Recognition</p>
+    
+    <div style="display: flex; justify-content: center; gap: 30px; margin: 15px 0; flex-wrap: wrap;">
+        <div style="text-align: center;">
+            <strong>🔧 Tech Stack</strong><br>
+            <span style="font-size: 0.9em;">Streamlit-WebRTC {st_webrtc_version}</span><br>
+            <span style="font-size: 0.9em;">aiortc {aiortc.__version__}</span><br>
+            <span style="font-size: 0.9em;">OpenCV & MobileNet-SSD</span>
+        </div>
+        <div style="text-align: center;">
+            <strong>🎯 Features</strong><br>
+            <span style="font-size: 0.9em;">Real-time Detection</span><br>
+            <span style="font-size: 0.9em;">Mobile Support</span><br>
+            <span style="font-size: 0.9em;">Voice Feedback</span>
+        </div>
+        <div style="text-align: center;">
+            <strong>🌐 Access</strong><br>
+            <span style="font-size: 0.9em;">PC Camera</span><br>
+            <span style="font-size: 0.9em;">Mobile Camera</span><br>
+            <span style="font-size: 0.9em;">Cross-Platform</span>
+        </div>
+    </div>
+    
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2);">
+        <p style="margin: 5px 0; font-size: 0.9em; opacity: 0.8;">
+            © 2025 AdMyVision | Built with ❤️ using Python & Streamlit
+        </p>
+        <p style="margin: 0; font-size: 0.8em; opacity: 0.7;">
+            🔒 Your privacy is protected - All processing happens locally
+        </p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
