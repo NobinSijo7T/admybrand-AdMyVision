@@ -105,7 +105,6 @@ PROTOTXT_ALT_PATH = Path("models/MobileNetSSD_deploy.prototxt")
 
 # Voice Manager Class
 class VoiceManager:
-class VoiceManager:
     def __init__(self):
         self.engine = None
         self.voice_enabled = False
