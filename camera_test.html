@@ -1,0 +1,77 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Access Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background-color: #ffebee; color: #c62828; }
+        .success { background-color: #e8f5e8; color: #2e7d32; }
+        .warning { background-color: #fff3e0; color: #ef6c00; }
+        video { max-width: 100%; height: auto; }
+    </style>
+</head>
+<body>
+    <h1>📱 Camera Access Test</h1>
+    <div id="status" class="status warning">Testing camera access...</div>
+    <video id="video" autoplay playsinline style="display: none;"></video>
+    <button id="testBtn" onclick="testCamera()">Test Camera Access</button>
+    
+    <div id="instructions" style="margin-top: 20px;">
+        <h3>If camera test fails with "navigator.mediaDevices is undefined":</h3>
+        <ol>
+            <li>Open Chrome settings</li>
+            <li>Type: <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code></li>
+            <li>Add this page's URL to the list</li>
+            <li>Set to "Enabled"</li>
+            <li>Restart Chrome</li>
+        </ol>
+    </div>
+
+    <script>
+        function updateStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+        }
+
+        async function testCamera() {
+            try {
+                updateStatus('Checking navigator.mediaDevices...', 'warning');
+                
+                if (!navigator.mediaDevices) {
+                    updateStatus('❌ navigator.mediaDevices is undefined! This page needs HTTPS or localhost.', 'error');
+                    return;
+                }
+                
+                if (!navigator.mediaDevices.getUserMedia) {
+                    updateStatus('❌ getUserMedia is not available in this browser.', 'error');
+                    return;
+                }
+                
+                updateStatus('✅ navigator.mediaDevices is available! Testing camera access...', 'success');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' }, 
+                    audio: false 
+                });
+                
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                video.style.display = 'block';
+                
+                updateStatus('🎉 Camera access successful! You can now use AdMyVision.', 'success');
+                
+            } catch (error) {
+                updateStatus(`❌ Camera access failed: ${error.message}`, 'error');
+                console.error('Camera test error:', error);
+            }
+        }
+
+        // Auto-test on page load
+        document.addEventListener('DOMContentLoaded', testCamera);
+    </script>
+</body>
+</html>

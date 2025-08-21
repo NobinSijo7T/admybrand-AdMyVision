@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔧 Chrome Flags Setup for AdMyVision</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            color: #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .step {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        
+        .step h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        
+        .code {
+            background: #f1f3f4;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        
+        .copy-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 0;
+            transition: background 0.3s;
+        }
+        
+        .copy-btn:hover {
+            background: #0056b3;
+        }
+        
+        .screenshot {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin: 15px 0;
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .qr-container {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Fix Camera Access in Chrome</h1>
+            <p>Enable camera streaming from phone to laptop in 5 easy steps</p>
+        </div>
+        
+        <div class="warning">
+            <strong>⚠️ For Android Chrome Users Only</strong><br>
+            iPhone users should use Safari with the HTTPS method instead.
+        </div>
+        
+        <div class="step">
+            <h3>📱 Step 1: Copy the Chrome Flags URL</h3>
+            <p>Copy this URL to enable insecure origins in Chrome:</p>
+            <div class="code" id="chrome-flags-url">chrome://flags/#unsafely-treat-insecure-origin-as-secure</div>
+            <button class="copy-btn" onclick="copyText('chrome-flags-url')">📋 Copy URL</button>
+        </div>
+        
+        <div class="step">
+            <h3>🌐 Step 2: Open Chrome Flags</h3>
+            <p>On your Android phone:</p>
+            <ol>
+                <li>Open Chrome browser</li>
+                <li>Paste the URL in the address bar</li>
+                <li>Tap "Go" or press Enter</li>
+            </ol>
+        </div>
+        
+        <div class="step">
+            <h3>⚙️ Step 3: Configure the Setting</h3>
+            <p>In the Chrome flags page:</p>
+            <ol>
+                <li>Find "Insecure origins treated as secure"</li>
+                <li>In the text box, add your laptop's URL:</li>
+            </ol>
+            <div class="code" id="laptop-url">http://192.168.1.3:8502</div>
+            <button class="copy-btn" onclick="copyText('laptop-url')">📋 Copy Laptop URL</button>
+            <ol start="3">
+                <li>Set the dropdown to <strong>"Enabled"</strong></li>
+            </ol>
+        </div>
+        
+        <div class="step">
+            <h3>🔄 Step 4: Restart Chrome</h3>
+            <p>Chrome will show a "Relaunch" button at the bottom. Tap it to restart Chrome with the new settings.</p>
+        </div>
+        
+        <div class="step">
+            <h3>✅ Step 5: Test Camera Access</h3>
+            <p>After Chrome restarts:</p>
+            <ol>
+                <li>Navigate to the AdMyVision app:</li>
+            </ol>
+            <div class="code" id="app-url">http://192.168.1.3:8502</div>
+            <button class="copy-btn" onclick="copyText('app-url')">📋 Copy App URL</button>
+            <ol start="2">
+                <li>Select "Phone Camera (WebRTC)" mode</li>
+                <li>Grant camera permissions when prompted</li>
+                <li>🎉 Camera should now work!</li>
+            </ol>
+        </div>
+        
+        <div class="qr-container">
+            <h3>📱 Quick Access QR Codes</h3>
+            <p>Scan these with your phone camera app:</p>
+            <div style="display: flex; justify-content: space-around; flex-wrap: wrap;">
+                <div style="margin: 10px;">
+                    <img src="chrome_flags_qr.png" alt="Chrome Flags QR" style="width: 150px; height: 150px;">
+                    <p><small>Chrome Flags Setup</small></p>
+                </div>
+                <div style="margin: 10px;">
+                    <img src="app_url_qr.png" alt="App URL QR" style="width: 150px; height: 150px;">
+                    <p><small>AdMyVision App</small></p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="success">
+            <h3>🎯 Why This Works</h3>
+            <p>This setting tells Chrome to treat your laptop's HTTP connection as if it were HTTPS, enabling camera access for your local network. This is safe because it only applies to your specific laptop IP address.</p>
+        </div>
+        
+        <div class="warning">
+            <h3>🔒 Security Note</h3>
+            <p>This setting only affects the specific URL you added (your laptop). It doesn't make other websites less secure. You can remove it later by going back to Chrome flags and setting it to "Default".</p>
+        </div>
+        
+        <div style="margin-top: 30px; text-align: center; color: #666;">
+            <small>
+                AdMyVision Chrome Setup Guide | 
+                Need help? Check the app's troubleshooting section
+            </small>
+        </div>
+    </div>
+
+    <script>
+        function copyText(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => {
+                    showCopySuccess();
+                }).catch(() => {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+        }
+        
+        function fallbackCopy(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showCopySuccess();
+            } catch (err) {
+                alert('Please manually copy: ' + text);
+            }
+            document.body.removeChild(textArea);
+        }
+        
+        function showCopySuccess() {
+            const originalText = event.target.textContent;
+            event.target.textContent = '✅ Copied!';
+            event.target.style.background = '#28a745';
+            
+            setTimeout(() => {
+                event.target.textContent = originalText;
+                event.target.style.background = '#007bff';
+            }, 2000);
+        }
+        
+        // Auto-update the laptop URL if accessing this page from the laptop
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            const currentUrl = `http://${window.location.hostname}:8502`;
+            document.getElementById('laptop-url').textContent = currentUrl;
+            document.getElementById('app-url').textContent = currentUrl;
+        }
+    </script>
+</body>
+</html>

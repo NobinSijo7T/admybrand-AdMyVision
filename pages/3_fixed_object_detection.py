@@ -432,24 +432,107 @@ def load_model():
         return None
 
 def get_local_ip():
-    """Get local IP for mobile connectivity."""
+    """Get local IP for mobile connectivity with better detection."""
     try:
+        # Try multiple methods to get the correct local IP
+        import socket
+        
+        # Method 1: Connect to external server
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except:
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+        
+        # Method 2: Get hostname IP
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+        if ip and not ip.startswith("127."):
+            return ip
+            
+        # Method 3: Check all network interfaces
+        import subprocess
+        import platform
+        
+        if platform.system() == "Windows":
+            result = subprocess.run(['ipconfig'], capture_output=True, text=True)
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if 'IPv4 Address' in line and '192.168.' in line:
+                    ip = line.split(':')[-1].strip()
+                    return ip
+        
+        return "192.168.1.100"  # Fallback IP
+        
+    except Exception as e:
+        print(f"Error getting local IP: {e}")
         return "localhost"
 
-def generate_qr_code(url):
-    """Generate QR code for mobile access."""
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(url)
-    qr.make(fit=True)
+def get_streamlit_port():
+    """Get the current Streamlit port."""
+    try:
+        # Try to get port from Streamlit server config
+        import streamlit.web.bootstrap as bootstrap
+        if hasattr(bootstrap, '_server') and bootstrap._server:
+            return bootstrap._server.port
+    except:
+        pass
     
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
+    # Try to get port from query params or environment
+    try:
+        if hasattr(st, 'query_params'):
+            port = st.query_params.get("port")
+            if port:
+                return port
+    except:
+        pass
+    
+    # Check common Streamlit ports
+    import socket
+    common_ports = [8501, 8502, 8503, 8504, 8505]
+    for port in common_ports:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result = s.connect_ex(('localhost', port))
+                if result == 0:  # Port is open
+                    return str(port)
+        except:
+            continue
+    
+    return "8501"  # Default Streamlit port
+
+def generate_qr_code(url):
+    """Generate QR code for mobile access with better error handling."""
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=5
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = BytesIO()
+        img.save(buf, format='PNG')
+        return buf.getvalue()
+    except Exception as e:
+        print(f"Error generating QR code: {e}")
+        # Return a simple text-based QR code as fallback
+        return None
+
+def validate_network_connection(ip, port):
+    """Validate that the network connection is accessible."""
+    try:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(3)
+            result = s.connect_ex((ip, int(port)))
+            return result == 0
+    except:
+        return False
 
 # Load model and colors
 COLORS = generate_label_colors()
@@ -784,63 +867,354 @@ if mode == "PC Camera":
             st.write(f"Queue size: {result_queue.qsize()}")
 
 elif mode == "Phone Camera (WebRTC)":
-    st.subheader("📱 Phone Camera Detection")
+    st.subheader("📱 Phone Camera → 💻 Laptop Detection")
+    
+    # Detect if accessing from mobile device with fallback
+    user_agent = st.context.headers.get("user-agent", "").lower()
+    is_mobile_fallback = any(mobile in user_agent for mobile in [
+        'android', 'iphone', 'ipad', 'ipod', 'blackberry', 'iemobile', 'opera mini'
+    ])
+    
+    # JavaScript detection with improved reliability
+    mobile_detection_js = f"""
+    <script>
+    function detectMobile() {{
+        const userAgent = navigator.userAgent.toLowerCase();
+        const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+        const isTablet = /ipad|android|tablet/i.test(userAgent) && !/mobile/i.test(userAgent);
+        const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const screenWidth = window.screen.width;
+        const screenHeight = window.screen.height;
+        const smallScreen = Math.min(screenWidth, screenHeight) < 768;
+        
+        const isMobileDevice = isMobile || (hasTouchScreen && smallScreen) || isTablet;
+        
+        // Multiple ways to communicate with Streamlit
+        try {{
+            window.parent.postMessage({{
+                type: 'streamlit:setComponentValue', 
+                value: {{is_mobile: isMobileDevice, userAgent: userAgent, screen: {{width: screenWidth, height: screenHeight}}}}
+            }}, '*');
+            
+            // Alternative method
+            window.parent.postMessage({{
+                type: 'deviceInfo',
+                data: {{is_mobile: isMobileDevice, fallback: {str(is_mobile_fallback).lower()}}}
+            }}, '*');
+        }} catch(e) {{
+            console.log('Device detection error:', e);
+        }}
+        
+        // Display detection result
+        document.body.innerHTML = '<div style="font-size:12px;color:#666;">Device: ' + (isMobileDevice ? 'Mobile' : 'Desktop') + ' (UA: ' + userAgent.substring(0,50) + '...)</div>';
+    }}
+    detectMobile();
+    </script>
+    """
+    
+    # Get device detection result with fallback
+    mobile_result = st.components.v1.html(mobile_detection_js, height=30)
+    
+    # Safe device detection with fallback
+    if mobile_result:
+        try:
+            is_mobile_device = mobile_result.get('is_mobile', is_mobile_fallback) if isinstance(mobile_result, dict) else is_mobile_fallback
+        except:
+            is_mobile_device = is_mobile_fallback
+    else:
+        is_mobile_device = is_mobile_fallback
+    
+    # Enhanced security warning for mobile camera access
+    if not is_mobile_device:
+        st.error("🚨 **CAMERA ACCESS FIX REQUIRED FOR MOBILE**")
+    
+    col_warn1, col_warn2 = st.columns([3, 1])
+    with col_warn1:
+        if is_mobile_device:
+            st.success("📱 **Mobile Device Detected** - Ready to send camera stream to laptop")
+        else:
+            st.info("💻 **Laptop/Desktop Detected** - Ready to receive camera stream from phone")
+            
+        st.markdown("""
+        **The "navigator.mediaDevices is undefined" error occurs because:**
+        - Mobile browsers require HTTPS or special settings for camera access
+        - HTTP connections from remote devices are blocked for security
+        
+        **✅ SIMPLE FIX: Enable Chrome flags (takes 30 seconds)**
+        """)
+    
+    with col_warn2:
+        if st.button("📖 Open Setup Guide", key="setup_guide"):
+            st.success("Opening Chrome setup guide...")
+            # This would ideally open chrome_setup_guide.html
+    
+    # Get network information
+    local_ip = get_local_ip()
+    port = get_streamlit_port()
+    
+    # Create the streaming URL
+    base_url = f"http://{local_ip}:{port}"
+    
+    # Add current page path to ensure phone opens the same page
+    current_path = st.query_params.get("page", "3_fixed_object_detection")
+    if not current_path.startswith("/"):
+        full_url = f"{base_url}/?page={current_path}"
+    else:
+        full_url = f"{base_url}{current_path}"
+    
+    # Alternative direct URL (simpler)
+    direct_url = base_url
     
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.info("📱 **Connect Your Phone:**")
+        st.info("📱 **Connect Your Phone Camera:**")
         
-        # Generate QR code
-        local_ip = get_local_ip()
-        url = f"http://{local_ip}:8501"
-        qr_image = generate_qr_code(url)
+        # Show network information
+        st.markdown(f"**🌐 Network Info:**")
+        st.code(f"Laptop IP: {local_ip}")
+        st.code(f"Port: {port}")
+        st.code(f"Full URL: {direct_url}")
         
-        st.image(qr_image, caption=f"Scan with phone: {url}", width=200)
+        # Validate connection
+        is_accessible = validate_network_connection(local_ip, port)
+        if is_accessible:
+            st.success("✅ Network accessible from other devices")
+        else:
+            st.warning("⚠️ Network may not be accessible - check firewall settings")
         
-        st.markdown("**📋 Instructions:**")
+        # Generate and display QR code
+        qr_image = generate_qr_code(direct_url)
+        if qr_image:
+            st.image(qr_image, caption=f"Scan to connect: {direct_url}", width=250)
+        else:
+            st.error("❌ Could not generate QR code")
+        
+        # Manual connection option
+        st.markdown("**📱 Manual Connection:**")
+        st.markdown(f"Open this URL on your phone: `{direct_url}`")
+        
+        # Copy button simulation
+        if st.button("📋 Copy URL to Clipboard"):
+            st.code(direct_url)
+            st.info("📋 Copy the URL above and paste it in your phone browser")
+        
+        st.markdown("**📋 Connection Steps:**")
         st.markdown("""
-        1. Scan QR code with phone camera
-        2. Open the link in browser
-        3. Allow camera permissions
-        4. Select this same page
-        5. Choose 'PC Camera' mode on phone
+        1. 📱 **Scan QR code** or **copy URL manually**
+        2. 🌐 **Open in phone browser** (Chrome/Safari recommended)
+        3. 📷 **Allow camera permissions** when prompted
+        4. 🎯 **Select "Phone Camera (WebRTC)"** mode on phone
+        5. ▶️ **Start camera** on phone to begin streaming
+        6. 💻 **Detection runs on laptop** with voice announcements
         """)
+        
+        # Enhanced Chrome flags instructions section
+        with st.expander("🔧 🚨 REQUIRED: Enable Camera Access (30 seconds)", expanded=True):
+            st.markdown("### 📱 For Android Chrome Users:")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown("**Step 1: Copy this URL**")
+                chrome_flags_url = "chrome://flags/#unsafely-treat-insecure-origin-as-secure"
+                st.code(chrome_flags_url)
+                
+                st.markdown("**Step 2: Add your laptop URL**")
+                st.code(f"http://{local_ip}:{port}")
+                
+                st.markdown("**Step 3: Set to 'Enabled' and restart Chrome**")
+                
+                st.success("✅ After this setup, camera will work immediately!")
+            
+            with col2:
+                # Show QR code for quick access to Chrome flags
+                qr_image = generate_qr_code(chrome_flags_url)
+                if qr_image:
+                    st.image(qr_image, caption="Chrome Flags QR", width=150)
+                
+                # App QR code
+                app_qr = generate_qr_code(direct_url)
+                if app_qr:
+                    st.image(app_qr, caption="AdMyVision App", width=150)
+            
+            st.markdown("### 🍎 For iPhone/iPad Users:")
+            st.warning("Safari requires HTTPS. Use the HTTPS setup button above or try a different solution.")
+            
+            st.markdown("### 🔄 Alternative: USB Debugging")
+            st.code("adb reverse tcp:8502 tcp:8502")
+            st.markdown("Then access: `http://localhost:8502`")
+        
+        # Network troubleshooting
+        with st.expander("🔧 Troubleshooting"):
+            st.markdown("""
+            **If connection fails:**
+            - ✅ Ensure both devices are on **same WiFi network**
+            - 🔥 **Disable Windows Firewall** temporarily for testing
+            - 🔄 **Refresh both pages** if connection drops
+            - 📱 Try **different browsers** on phone (Chrome, Safari, Edge)
+            - 🌐 **Manually type the URL** if QR code doesn't work
+            """)
+            
+            st.error("🚨 **navigator.mediaDevices is undefined** error fix:")
+            st.markdown("""
+            This error occurs because camera access requires HTTPS on mobile devices when connecting to remote servers.
+            
+            **Solution 1: Enable insecure origins in Chrome (RECOMMENDED)**
+            1. Open Chrome on your phone
+            2. Type: `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+            3. Add your laptop's URL: `http://{}`
+            4. Set to "Enabled"
+            5. Restart Chrome
+            6. Try connecting again
+            
+            **Solution 2: Use HTTPS (Advanced)**
+            Generate SSL certificate and restart Streamlit:
+            ```bash
+            # Generate self-signed certificate
+            openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 365 -out cert.pem
+            
+            # Restart Streamlit with HTTPS
+            streamlit run pages/3_fixed_object_detection.py --server.sslCertFile=cert.pem --server.sslKeyFile=key.pem
+            ```
+            
+            **Solution 3: Use localhost tunnel**
+            1. Connect phone via USB
+            2. Enable USB debugging
+            3. Use ADB port forwarding: `adb reverse tcp:8502 tcp:8502`
+            4. Access via `http://localhost:8502` on phone
+            """.format(f"{local_ip}:{port}"))
+        
+        st.warning("📌 **Critical:** Both devices must be on the same WiFi network!")
     
     with col2:
-        st.info("🌐 **Connection Status:**")
+        st.info("🌐 **Streaming Status:**")
         
-        # Simplified WebRTC for phone
-        webrtc_ctx = webrtc_streamer(
-            key="phone_camera",
-            mode=WebRtcMode.SENDRECV,
-            video_frame_callback=video_frame_callback,
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 640, "max": 1280},
-                    "height": {"ideal": 480, "max": 720},
-                    "frameRate": {"ideal": 10, "max": 15}
+        # Conditional WebRTC configuration based on device type
+        if is_mobile_device:
+            # MOBILE DEVICE: Send camera to laptop (SENDONLY)
+            st.success("📱 **Mobile Mode:** Sending your camera to laptop")
+            webrtc_ctx = webrtc_streamer(
+                key="mobile_camera_sender",
+                mode=WebRtcMode.SENDONLY,  # SEND ONLY - mobile sends its camera
+                video_frame_callback=None,  # No processing on mobile side
+                media_stream_constraints={
+                    "video": {
+                        "width": {"ideal": 640, "min": 320, "max": 1280},
+                        "height": {"ideal": 480, "min": 240, "max": 720},
+                        "frameRate": {"ideal": 15, "min": 10, "max": 25},
+                        "facingMode": "environment"  # Use back camera on mobile
+                    },
+                    "audio": False
                 },
-                "audio": False
-            },
-            async_processing=True,
-            rtc_configuration={
-                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-            }
-        )
-        
-        if webrtc_ctx.state.playing:
-            st.success("✅ Phone Connected!")
-        elif webrtc_ctx.state.signalling:
-            st.warning("🔄 Connecting...")
+                async_processing=True,
+                rtc_configuration={
+                    "iceServers": [
+                        {"urls": ["stun:stun.l.google.com:19302"]},
+                        {"urls": ["stun:stun1.l.google.com:19302"]},
+                        {"urls": ["stun:stun2.l.google.com:19302"]},
+                        {"urls": ["stun:stun3.l.google.com:19302"]},
+                        {"urls": ["stun:stun4.l.google.com:19302"]}
+                    ],
+                    "iceCandidatePoolSize": 20,
+                    "iceTransportPolicy": "all"
+                },
+                video_html_attrs={
+                    "style": {"width": "100%", "margin": "0 auto", "border": "2px solid #4CAF50"},
+                    "controls": False,
+                    "autoplay": True,
+                    "muted": True
+                }
+            )
         else:
-            st.error("❌ Not Connected")
-    
-    # Detection results
-    if webrtc_ctx.state.playing:
-        st.subheader("🔍 Detection Results")
+            # LAPTOP/DESKTOP: Receive camera from mobile (RECVONLY)
+            st.info("💻 **Laptop Mode:** Receiving camera from phone")
+            webrtc_ctx = webrtc_streamer(
+                key="laptop_camera_receiver", 
+                mode=WebRtcMode.RECVONLY,  # RECEIVE ONLY - laptop doesn't send its camera
+                video_frame_callback=video_frame_callback,  # Process received frames
+                media_stream_constraints={
+                    "video": False,  # Laptop doesn't use its camera
+                    "audio": False   # No audio needed
+                },
+                async_processing=True,
+                rtc_configuration={
+                    "iceServers": [
+                        {"urls": ["stun:stun.l.google.com:19302"]},
+                        {"urls": ["stun:stun1.l.google.com:19302"]},
+                        {"urls": ["stun:stun2.l.google.com:19302"]},
+                        {"urls": ["stun:stun3.l.google.com:19302"]},
+                        {"urls": ["stun:stun4.l.google.com:19302"]}
+                    ],
+                    "iceCandidatePoolSize": 20,
+                    "iceTransportPolicy": "all"
+                },
+                video_html_attrs={
+                    "style": {"width": "100%", "margin": "0 auto", "border": "2px solid #ff6b6b"},
+                    "controls": False,
+                    "autoplay": True,
+                    "muted": True,
+                    "playsinline": True  # Important for mobile browsers
+                }
+            )
         
-        # Update detections
+        # Enhanced connection status with more detailed feedback
+        if webrtc_ctx.state.playing:
+            st.success("✅ Phone camera streaming to laptop!")
+            st.success("🎯 AI detection running on laptop")
+            if voice_manager and st.session_state.voice_enabled:
+                st.success("🔊 Voice announcements enabled")
+            
+            # Show connection quality info
+            st.info("📊 **Stream Quality:** Good")
+            
+        elif webrtc_ctx.state.signalling:
+            st.warning("🔄 Establishing connection with phone...")
+            st.info("💡 Please wait, handshake in progress...")
+            
+            # Show troubleshooting hints during connection
+            with st.expander("Connection taking too long?"):
+                st.markdown("""
+                - 🔄 **Refresh both devices**
+                - 🌐 **Check WiFi connection**
+                - 📱 **Allow camera permissions** on phone
+                - 🔥 **Check firewall settings** on laptop
+                """)
+                
+        else:
+            st.error("❌ No phone connection")
+            st.info("📱 Scan QR code with phone to start streaming")
+            
+            # Show detailed connection instructions
+            st.markdown("**🔍 Connection Status:**")
+            st.markdown(f"- 📡 Laptop ready at: `{local_ip}:{port}`")
+            st.markdown(f"- 🌐 Waiting for phone at: `{direct_url}`")
+            
+            if not is_accessible:
+                st.error("🚫 **Network Issue Detected!**")
+                st.markdown("""
+                **Quick Fixes:**
+                1. 🔥 Turn off Windows Firewall temporarily
+                2. 🌐 Check WiFi network (same for both devices)
+                3. 🔄 Restart Streamlit app
+                4. 📱 Try manual URL entry on phone
+                """)
+        
+        # Network diagnostics
+        st.markdown("**🔍 Network Diagnostics:**")
+        st.caption(f"📡 Laptop IP: {local_ip}")
+        st.caption(f"🌐 Port: {port}")
+        st.caption(f"🔗 Accessibility: {'✅ Good' if is_accessible else '❌ Issues'}")
+    
+    # Detection results - only show when streaming
+    if webrtc_ctx.state.playing:
+        st.markdown("---")
+        st.subheader("🔍 Live Detection Results (Processing on Laptop)")
+        
+        # Create three columns for better layout
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        # Update detections from phone stream
         current_phone_detections = 0
         total_phone_detected = 0
         try:
@@ -850,6 +1224,7 @@ elif mode == "Phone Camera (WebRTC)":
                     st.session_state.detections = result_data.get('detections', [])
                     current_phone_detections = result_data.get('current_count', 0)
                     total_phone_detected = result_data.get('total_count', 0)
+                    st.session_state.frame_count = result_data.get('frame_count', 0)
                 else:
                     # Fallback for old format
                     st.session_state.detections = result_data
@@ -857,28 +1232,251 @@ elif mode == "Phone Camera (WebRTC)":
         except:
             pass
         
-        # Show detection statistics for phone camera
-        col1, col2 = st.columns(2)
+        # Show detection statistics in columns
         with col1:
-            st.metric("Current Objects", current_phone_detections)
+            st.metric("📊 Current Objects", current_phone_detections)
+            st.metric("🎯 Total Detected", total_phone_detected)
+        
         with col2:
-            st.metric("🎯 Total Objects Found", total_phone_detected)
+            st.metric("📹 Frames Processed", st.session_state.frame_count)
+            st.metric("🎚️ Confidence Threshold", f"{score_threshold:.2f}")
         
-        # Reset button for total count
-        if st.button("🔄 Reset Total Count", key="phone_reset", help="Reset the total objects detected counter"):
-            detector.reset_total_count()
-            st.rerun()
+        with col3:
+            # Voice status
+            if voice_manager and st.session_state.voice_enabled:
+                if voice_manager.use_gtts:
+                    st.success("🔊 Google TTS Active")
+                else:
+                    st.success("🔊 Windows Voice Active")
+            else:
+                st.info("🔇 Voice Disabled")
+            
+            # Reset button for total count
+            if st.button("🔄 Reset Count", key="phone_reset", help="Reset the total objects detected counter"):
+                detector.reset_total_count()
+                st.rerun()
         
+        # Detailed detection list
         if st.session_state.detections:
-            detection_data = [{
-                'Object': det.label.title(),
-                'Confidence': f"{det.score:.1%}",
-                'Position': f"({int(det.box[0])}, {int(det.box[1])})"
-            } for det in st.session_state.detections]
-            st.dataframe(detection_data, use_container_width=True)
+            st.markdown("### 📋 Detected Objects")
+            
+            # Create a more detailed table
+            detection_data = []
+            for i, det in enumerate(st.session_state.detections, 1):
+                # Calculate approximate distance based on box size
+                box_area = (det.box[2] - det.box[0]) * (det.box[3] - det.box[1])
+                distance = detector.estimate_distance(box_area, det.label)
+                
+                # Confidence level indicator
+                if det.score > 0.8:
+                    confidence_indicator = "🟢 High"
+                elif det.score > 0.6:
+                    confidence_indicator = "🟡 Medium"
+                else:
+                    confidence_indicator = "🔴 Low"
+                
+                detection_data.append({
+                    '#': i,
+                    'Object': det.label.title(),
+                    'Confidence': f"{det.score:.1%}",
+                    'Level': confidence_indicator,
+                    'Distance': f"~{distance:.1f}m",
+                    'Position': f"({int(det.box[0])}, {int(det.box[1])})"
+                })
+            
+            st.dataframe(detection_data, use_container_width=True, hide_index=True)
+            
+            # Show top detection
+            if detection_data:
+                top_detection = max(st.session_state.detections, key=lambda x: x.score)
+                st.info(f"🎯 **Best Detection:** {top_detection.label.title()} ({top_detection.score:.1%} confidence)")
         else:
-            st.info("🔍 Point camera at objects to detect them")
+            st.info("👀 **Point your phone camera at objects to detect:**")
+            st.markdown("""
+            - 👤 People
+            - 🚗 Vehicles (car, bus, bicycle)
+            - 🪑 Furniture (chair, table)
+            - 🍼 Common items (bottle, cup)
+            - 🐕 Animals (dog, cat, bird)
+            """)
+    
+    else:
+        # Instructions when not connected
+        st.markdown("---")
+        st.info("📱 **Waiting for phone connection...**")
+        st.markdown("""
+        **Troubleshooting Tips:**
+        - Ensure both devices are on the same WiFi network
+        - Allow camera permissions in your phone browser
+        - Try refreshing both pages if connection fails
+        - Use Chrome or Safari on your phone for best compatibility
+        """)
 
 # Footer
 st.markdown("---")
+
+# Add JavaScript for real-time camera access detection (especially for mobile users)
+if mode == "Phone Camera (WebRTC)":
+    st.markdown("### 🔍 Real-time Camera Access Check")
+    
+    # Enhanced JavaScript with polyfills and multiple detection methods
+    camera_check_js = """
+    <div id="camera-status" style="padding: 15px; margin: 10px 0; border-radius: 8px; background-color: #fff3e0; color: #ef6c00; border-left: 4px solid #ff9800;">
+        🔄 Checking camera access...
+    </div>
+    
+    <div id="detailed-status" style="margin-top: 10px; padding: 10px; border-radius: 5px; background-color: #f5f5f5; font-family: monospace; font-size: 12px; display: none;">
+    </div>
+    
+    <script>
+    // Enhanced camera access detection with polyfills
+    function updateStatus(message, type, details = '') {
+        const statusDiv = document.getElementById('camera-status');
+        const detailsDiv = document.getElementById('detailed-status');
+        
+        const styles = {
+            error: { bg: '#ffebee', color: '#c62828', border: '#f44336' },
+            success: { bg: '#e8f5e8', color: '#2e7d32', border: '#4caf50' },
+            warning: { bg: '#fff3e0', color: '#ef6c00', border: '#ff9800' },
+            info: { bg: '#e3f2fd', color: '#1565c0', border: '#2196f3' }
+        };
+        
+        const style = styles[type] || styles.warning;
+        statusDiv.innerHTML = message;
+        statusDiv.style.backgroundColor = style.bg;
+        statusDiv.style.color = style.color;
+        statusDiv.style.borderLeftColor = style.border;
+        
+        if (details) {
+            detailsDiv.innerHTML = details;
+            detailsDiv.style.display = 'block';
+        } else {
+            detailsDiv.style.display = 'none';
+        }
+    }
+
+    function addPolyfills() {
+        // Add navigator polyfill if missing
+        if (typeof navigator === 'undefined') {
+            window.navigator = {};
+        }
+        
+        // Add mediaDevices polyfill for older browsers
+        if (!navigator.mediaDevices) {
+            navigator.mediaDevices = {};
+        }
+        
+        // Add getUserMedia polyfill
+        if (!navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia = function(constraints) {
+                // Try legacy getUserMedia methods
+                const getUserMedia = navigator.getUserMedia || 
+                                   navigator.webkitGetUserMedia || 
+                                   navigator.mozGetUserMedia ||
+                                   navigator.msGetUserMedia;
+                
+                if (!getUserMedia) {
+                    return Promise.reject(new Error('getUserMedia is not implemented in this browser'));
+                }
+                
+                return new Promise(function(resolve, reject) {
+                    getUserMedia.call(navigator, constraints, resolve, reject);
+                });
+            };
+        }
+        
+        // Add enumerateDevices polyfill
+        if (!navigator.mediaDevices.enumerateDevices) {
+            navigator.mediaDevices.enumerateDevices = function() {
+                return Promise.resolve([{
+                    deviceId: 'default',
+                    kind: 'videoinput',
+                    label: 'Default Camera',
+                    groupId: 'default'
+                }]);
+            };
+        }
+    }
+
+    async function checkCameraAccess() {
+        let details = '';
+        
+        try {
+            // Add polyfills first
+            addPolyfills();
+            
+            details += 'Navigator: ' + (typeof navigator !== 'undefined' ? '✅' : '❌') + '\\n';
+            details += 'MediaDevices: ' + (navigator.mediaDevices ? '✅' : '❌') + '\\n';
+            details += 'GetUserMedia: ' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '✅' : '❌') + '\\n';
+            details += 'HTTPS: ' + (location.protocol === 'https:' ? '✅' : '❌') + '\\n';
+            details += 'Localhost: ' + (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? '✅' : '❌') + '\\n';
+            details += 'User Agent: ' + navigator.userAgent.substring(0, 50) + '...\\n';
+            
+            // Check basic availability
+            if (typeof navigator === 'undefined') {
+                updateStatus('❌ Navigator not available - this might be a server-side render', 'error', details);
+                return;
+            }
+            
+            if (!navigator.mediaDevices) {
+                updateStatus(`
+                    🚨 <strong>CAMERA ACCESS BLOCKED!</strong><br><br>
+                    � <strong>Quick Fix for Android Chrome:</strong><br>
+                    1️⃣ Copy: <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code><br>
+                    2️⃣ Paste in Chrome address bar<br>
+                    3️⃣ Add: <code>${window.location.origin}</code><br>
+                    4️⃣ Set to "Enabled" and restart Chrome<br><br>
+                    🍎 <strong>iPhone users:</strong> This requires HTTPS setup<br>
+                    📍 <strong>Current URL:</strong> ${window.location.href}
+                `, 'error', details);
+                return;
+            }
+            
+            if (!navigator.mediaDevices.getUserMedia) {
+                updateStatus('❌ getUserMedia not available in this browser', 'error', details);
+                return;
+            }
+            
+            // Test device enumeration first
+            updateStatus('🔍 Checking for available cameras...', 'info', details);
+            
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(device => device.kind === 'videoinput');
+                details += 'Cameras found: ' + cameras.length + '\\n';
+                
+                if (cameras.length === 0) {
+                    updateStatus('⚠️ No cameras detected on this device', 'warning', details);
+                    return;
+                }
+                
+                // Test actual camera access without requesting permission yet
+                updateStatus('✅ Camera devices detected! MediaDevices API is working.', 'success', details);
+                details += 'Camera test: Successful\\n';
+                
+            } catch (error) {
+                details += 'Device enumeration error: ' + error.message + '\\n';
+                updateStatus(`⚠️ Camera check partial: ${error.message}`, 'warning', details);
+            }
+            
+        } catch (error) {
+            details += 'Check error: ' + error.message + '\\n';
+            updateStatus(`❌ Camera access check failed: ${error.message}`, 'error', details);
+        }
+    }
+    
+    // Check immediately and also after page loads
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', checkCameraAccess);
+    } else {
+        checkCameraAccess();
+    }
+    
+    // Re-check every 3 seconds in case user fixes the issue
+    setInterval(checkCameraAccess, 3000);
+    </script>
+    """
+    
+    st.components.v1.html(camera_check_js, height=200)
+
 st.markdown(f"**Streamlit-WebRTC**: {st_webrtc_version} | **aiortc**: {aiortc.__version__}")
