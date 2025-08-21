@@ -416,8 +416,8 @@ else:
 
 # Page configuration
 st.set_page_config(
-    page_title="🎯 Object Detection",
-    page_icon="🎯",
+    page_title="AdMySense - Advanced Detection",
+    page_icon="🔍",
     layout="wide"
 )
 
@@ -511,7 +511,17 @@ if net is None:
     st.stop()
 
 # Header
-st.title("🎯 Real-time Object Detection")
+col1, col2 = st.columns([1, 4])
+with col1:
+    try:
+        logo_img = Image.open("src/logo black.png")
+        st.image(logo_img, width=80)
+    except:
+        st.write("🔍")  # Fallback icon if logo not found
+
+with col2:
+    st.title("AdMySense")
+    st.markdown("**Advanced Detection for My Senses**")
 st.markdown("---")
 
 # Initialize session state
@@ -888,40 +898,11 @@ else:
 
 # Modern Footer
 st.markdown("---")
-st.markdown("""
-<div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-           border-radius: 10px; margin-top: 30px; color: white;">
-    <h3 style="margin: 0; color: white;">🚀 AdMyVision - Object Detection Platform</h3>
+footer_html = f"""
+<div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%); 
+           border-radius: 10px; margin-top: 30px; color: white; box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);">
+    <h3 style="margin: 0; color: white;">🚀 AdMySense - Advanced Detection Platform</h3>
     <p style="margin: 10px 0; opacity: 0.9;">Powered by AI for Real-time Object Recognition</p>
-    
-    <div style="display: flex; justify-content: center; gap: 30px; margin: 15px 0; flex-wrap: wrap;">
-        <div style="text-align: center;">
-            <strong>🔧 Tech Stack</strong><br>
-            <span style="font-size: 0.9em;">Streamlit-WebRTC {st_webrtc_version}</span><br>
-            <span style="font-size: 0.9em;">aiortc {aiortc.__version__}</span><br>
-            <span style="font-size: 0.9em;">OpenCV & MobileNet-SSD</span>
-        </div>
-        <div style="text-align: center;">
-            <strong>🎯 Features</strong><br>
-            <span style="font-size: 0.9em;">Real-time Detection</span><br>
-            <span style="font-size: 0.9em;">Mobile Support</span><br>
-            <span style="font-size: 0.9em;">Voice Feedback</span>
-        </div>
-        <div style="text-align: center;">
-            <strong>🌐 Access</strong><br>
-            <span style="font-size: 0.9em;">PC Camera</span><br>
-            <span style="font-size: 0.9em;">Mobile Camera</span><br>
-            <span style="font-size: 0.9em;">Cross-Platform</span>
-        </div>
-    </div>
-    
-    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2);">
-        <p style="margin: 5px 0; font-size: 0.9em; opacity: 0.8;">
-            © 2025 AdMyVision | Built with ❤️ using Python & Streamlit
-        </p>
-        <p style="margin: 0; font-size: 0.8em; opacity: 0.7;">
-            🔒 Your privacy is protected - All processing happens locally
-        </p>
-    </div>
 </div>
-""", unsafe_allow_html=True)
+"""
+st.markdown(footer_html, unsafe_allow_html=True)
