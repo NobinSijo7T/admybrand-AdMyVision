@@ -3,6 +3,12 @@
 
 <div align="center">
   <img src="src/logo.png" alt="AdMySense Logo" width="200"/>
+  
+  <br><br>
+  
+  [![Website](https://img.shields.io/badge/Website-Visit%20Now-blue?style=for-the-badge&logo=vercel)](https://admy-sense-web.vercel.app/)
+  [![Live Demo](https://img.shields.io/badge/Live%20Demo-Try%20Now-green?style=for-the-badge&logo=streamlit)](https://nobinsijo7t-admybrand-admy-pages2-fixed-object-detection-dqerbk.streamlit.app/)
+  
 </div>
 
 ## Description
@@ -145,14 +151,14 @@ The system tracks and reports:
 
 | Issue | Solution |
 |-------|----------|
-
 | Misaligned overlays | Check timestamp units (ms) and frame alignment |
 | High CPU usage | Reduce to 320×240 resolution or switch to WASM mode |
 | Connection drops | Use Chrome `webrtc-internals` to inspect stats |
 
-## 🎥 Demo Video
+## 🎯 Live Applications
 
-[Live Demo Application](https://share.streamlit.io/whitphx/style-transfer-web-app/main/app.py) - Live phone stream, metrics, and improvements
+- **[Website](https://admy-sense-web.vercel.app/)** - Project information and documentation
+- **[Live Demo](https://nobinsijo7t-admybrand-admy-pages2-fixed-object-detection-dqerbk.streamlit.app/)** - Interactive object detection demo with live phone streaming
 
 ## 📋 Requirements
 
