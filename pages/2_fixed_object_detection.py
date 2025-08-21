@@ -511,17 +511,21 @@ if net is None:
     st.stop()
 
 # Header
-col1, col2 = st.columns([1, 4])
+col1, col2 = st.columns([1, 6])
 with col1:
     try:
         logo_img = Image.open("src/logo black.png")
-        st.image(logo_img, width=80)
+        st.image(logo_img, width=120)
     except:
         st.write("🔍")  # Fallback icon if logo not found
 
 with col2:
-    st.title("AdMySense")
-    st.markdown("**Advanced Detection for My Senses**")
+    st.markdown("""
+    <div style="margin-left: -20px;">
+        <h1 style="margin-bottom: 5px;">AdMySense</h1>
+        <p style="font-size: 1.2em; margin-top: 0;"><strong>Advanced Detection for My Senses</strong></p>
+    </div>
+    """, unsafe_allow_html=True)
 st.markdown("---")
 
 # Initialize session state
@@ -833,8 +837,8 @@ if mode == "PC Camera":
 elif mode == "Phone Camera (WebRTC)":
     st.subheader("📱 Phone Camera Detection")
     
-    # Camera selection for mobile
-    col1, col2 = st.columns([2, 1])
+    # Add QR code section for mobile access
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         st.info("📱 **Mobile Camera Tips:**\n- Allow camera permissions when prompted\n- Use HTTPS for camera access\n- Best with Chrome or Safari")
     with col2:
@@ -843,6 +847,16 @@ elif mode == "Phone Camera (WebRTC)":
             ["Back Camera", "Front Camera"],
             help="Switch between front and back camera on mobile"
         )
+    with col3:
+        st.markdown("**📱 Access on Mobile:**")
+        # Generate QR code for the deployed app
+        deployed_url = "https://nobinsijo7t-admybrand-admy-pages2-fixed-object-detection-dqerbk.streamlit.app/"
+        qr_image = generate_qr_code(deployed_url)
+        st.image(qr_image, caption="Scan to open on phone", width=120)
+        st.markdown("🔗 **Direct Link:**")
+        st.markdown(f"[Open on Mobile]({deployed_url})")
+    
+    st.markdown("---")
     
     # Set facing mode based on selection
     facing_mode = "environment" if camera_mode == "Back Camera" else "user"
